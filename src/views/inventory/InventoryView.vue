@@ -1,0 +1,453 @@
+<script setup lang="ts">
+import { ref } from 'vue'
+import { ElMessage } from 'element-plus'
+import { inventoryApi } from '@/api/inventory'
+import { createIdempotencyAttempt } from '@/api/http'
+import type { InventoryBalance, InventoryLedger, MaterialType } from '@/types/inventory'
+import { compareDecimal } from '@/utils/decimal'
+
+const materialQuery = ref('')
+const balances = ref<InventoryBalance[]>([])
+const ledgers = ref<InventoryLedger[]>([])
+const loading = ref(false)
+const pending = ref(false)
+const failure = ref('')
+const traceId = ref('')
+const issue = ref({
+  issueNo: '',
+  orderItemId: '',
+  warehouseId: '',
+  materialId: '',
+  materialType: 'FABRIC' as MaterialType,
+  batchNo: '',
+  quantity: '0',
+})
+const returned = ref({ returnNo: '', materialIssueId: '', quantity: '0' })
+const issueAttempt = createIdempotencyAttempt()
+const returnAttempt = createIdempotencyAttempt()
+
+function report(error: unknown, fallback: string): void {
+  const candidate = error as { message?: string; traceId?: string }
+  failure.value = candidate.message || fallback
+  traceId.value = candidate.traceId || ''
+}
+
+async function load(): Promise<void> {
+  if (!materialQuery.value.trim()) return
+  loading.value = true
+  failure.value = ''
+  try {
+    ;[balances.value, ledgers.value] = await Promise.all([
+      inventoryApi.balances(materialQuery.value.trim()),
+      inventoryApi.ledgers(materialQuery.value.trim()),
+    ])
+    issue.value.materialId = materialQuery.value.trim()
+  } catch (error) {
+    report(error, '库存数据加载失败')
+  } finally {
+    loading.value = false
+  }
+}
+
+async function submitIssue(): Promise<void> {
+  if (pending.value) return
+  pending.value = true
+  failure.value = ''
+  const payload = { ...issue.value }
+  try {
+    const result = await inventoryApi.issue(payload, issueAttempt.keyFor(payload))
+    issueAttempt.succeeded()
+    returned.value.materialIssueId = result.issue.id
+    materialQuery.value = result.issue.materialId
+    ElMessage.success('领料已记账，库存流水同步写入')
+    await load()
+  } catch (error) {
+    issueAttempt.failed(error)
+    report(error, '领料失败')
+  } finally {
+    pending.value = false
+  }
+}
+
+async function submitReturn(): Promise<void> {
+  if (pending.value) return
+  pending.value = true
+  failure.value = ''
+  const payload = { ...returned.value }
+  try {
+    const result = await inventoryApi.returnMaterial(payload, returnAttempt.keyFor(payload))
+    returnAttempt.succeeded()
+    materialQuery.value = result.issue.materialId
+    ElMessage.success('退料已回到来源批次')
+    await load()
+  } catch (error) {
+    returnAttempt.failed(error)
+    report(error, '退料失败')
+  } finally {
+    pending.value = false
+  }
+}
+</script>
+
+<template>
+  <section class="inventory-console" :aria-busy="loading">
+    <header class="inventory-head">
+      <div>
+        <p class="eyebrow">STOCK CONTROL / MATERIAL DESK</p>
+        <h1>库存与领退料</h1>
+        <p>余额锁定、流水双写；每一次出入库都回到明确的仓库、物料和批次。</p>
+      </div>
+      <div class="equation-ribbon">
+        <small>库存守恒公式</small>
+        <b>可用量 = 现存量 − 预占量</b>
+      </div>
+    </header>
+
+    <form class="query-strip" @submit.prevent="load">
+      <label>
+        <span>物料 ID</span>
+        <input v-model="materialQuery" data-testid="material-query" placeholder="输入物料 UUID" />
+      </label>
+      <button
+        data-testid="load-inventory"
+        class="ink-button"
+        type="button"
+        :disabled="loading"
+        @click="load"
+      >
+        {{ loading ? '校验中…' : '读取批次库存' }}
+      </button>
+    </form>
+
+    <div v-if="failure" class="error-ticket" role="alert" aria-live="polite">
+      <b>{{ failure }}</b
+      ><small v-if="traceId">追踪号 {{ traceId }}</small>
+    </div>
+
+    <div class="balance-grid">
+      <article v-for="balance in balances" :key="balance.id" class="balance-ticket">
+        <header>
+          <span>LOT</span><code>{{ balance.batchNo || '无批次' }}</code>
+        </header>
+        <dl>
+          <div>
+            <dt>现存</dt>
+            <dd>{{ balance.onHand }}</dd>
+          </div>
+          <div>
+            <dt>预占</dt>
+            <dd>{{ balance.reserved }}</dd>
+          </div>
+          <div class="available">
+            <dt>可用</dt>
+            <dd data-testid="available-quantity">{{ balance.available }}</dd>
+          </div>
+        </dl>
+        <footer>
+          <code>{{ balance.warehouseId.slice(0, 8) }}</code
+          ><span>v{{ balance.version }}</span>
+        </footer>
+      </article>
+      <p v-if="!balances.length && !loading" class="empty-note">
+        输入物料 ID，查看跨仓库、跨批次的实时可用量。
+      </p>
+    </div>
+
+    <div class="movement-grid">
+      <form class="movement-card issue" @submit.prevent="submitIssue">
+        <header>
+          <span>OUT</span>
+          <div>
+            <h2>领料出库</h2>
+            <p>扣减前锁定余额行，禁止负库存。</p>
+          </div>
+        </header>
+        <div class="field-grid">
+          <label><span>领料单号</span><input v-model="issue.issueNo" required /></label>
+          <label><span>订单项 ID</span><input v-model="issue.orderItemId" required /></label>
+          <label><span>仓库 ID</span><input v-model="issue.warehouseId" required /></label>
+          <label><span>物料 ID</span><input v-model="issue.materialId" required /></label>
+          <label
+            ><span>物料类型</span
+            ><select v-model="issue.materialType">
+              <option>FABRIC</option>
+              <option>ACCESSORY</option>
+            </select></label
+          >
+          <label><span>来源批次</span><input v-model="issue.batchNo" /></label>
+          <label
+            ><span>数量</span
+            ><input
+              v-model="issue.quantity"
+              type="text"
+              inputmode="decimal"
+              min="0.000001"
+              step="0.000001"
+              required
+          /></label>
+        </div>
+        <button class="ink-button" type="submit" :disabled="pending">确认领料</button>
+      </form>
+
+      <form class="movement-card return" @submit.prevent="submitReturn">
+        <header>
+          <span>IN</span>
+          <div>
+            <h2>余料退库</h2>
+            <p>回到原领料单与原批次，累计不得超过领料量。</p>
+          </div>
+        </header>
+        <div class="field-grid single">
+          <label><span>退料单号</span><input v-model="returned.returnNo" required /></label>
+          <label><span>原领料 ID</span><input v-model="returned.materialIssueId" required /></label>
+          <label
+            ><span>数量</span
+            ><input
+              v-model="returned.quantity"
+              type="text"
+              inputmode="decimal"
+              min="0.000001"
+              step="0.000001"
+              required
+          /></label>
+        </div>
+        <button class="paper-button" type="submit" :disabled="pending">确认退料</button>
+      </form>
+    </div>
+
+    <article class="ledger-panel">
+      <header>
+        <div>
+          <p class="eyebrow">APPEND-ONLY JOURNAL</p>
+          <h2>不可变库存流水</h2>
+        </div>
+        <b>{{ ledgers.length }} 笔</b>
+      </header>
+      <ol>
+        <li v-for="entry in ledgers" :key="entry.id">
+          <time>{{ new Date(entry.occurredAt).toLocaleString('zh-CN') }}</time>
+          <strong>{{ entry.eventType }}</strong
+          ><code>{{ entry.batchNo || '无批次' }}</code>
+          <span
+            >现存 {{ compareDecimal(entry.deltaOnHand, '0') > 0 ? '+' : ''
+            }}{{ entry.deltaOnHand }}</span
+          >
+          <span
+            >预占 {{ compareDecimal(entry.deltaReserved, '0') > 0 ? '+' : ''
+            }}{{ entry.deltaReserved }}</span
+          >
+          <small>{{ entry.businessReference }}</small>
+        </li>
+      </ol>
+    </article>
+  </section>
+</template>
+
+<style scoped>
+.inventory-console {
+  display: grid;
+  gap: 24px;
+  color: #18201c;
+}
+.inventory-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 28px;
+  padding: 28px;
+  border: 1px solid #1f2c25;
+  background: linear-gradient(120deg, #f4efe2 0 65%, #dce7d5 65%);
+}
+.inventory-head h1 {
+  font:
+    700 clamp(2rem, 4vw, 4rem)/0.95 Georgia,
+    serif;
+  margin: 8px 0;
+}
+.inventory-head p {
+  max-width: 650px;
+}
+.equation-ribbon {
+  align-self: center;
+  background: #17241d;
+  color: #f4efe2;
+  padding: 18px 22px;
+  transform: rotate(-1deg);
+  box-shadow: 6px 6px 0 #d9673f;
+}
+.equation-ribbon small,
+.equation-ribbon b {
+  display: block;
+}
+.query-strip {
+  display: flex;
+  gap: 12px;
+  align-items: end;
+}
+.query-strip label {
+  flex: 1;
+}
+.query-strip span,
+.field-grid span {
+  display: block;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  margin-bottom: 6px;
+}
+.query-strip input,
+.field-grid input,
+.field-grid select {
+  box-sizing: border-box;
+  width: 100%;
+  border: 1px solid #69766e;
+  background: #fffdf7;
+  padding: 12px;
+}
+.ink-button,
+.paper-button {
+  border: 1px solid #17241d;
+  padding: 12px 18px;
+  font-weight: 800;
+  cursor: pointer;
+}
+.ink-button {
+  background: #17241d;
+  color: #fff;
+}
+.paper-button {
+  background: #f4efe2;
+  color: #17241d;
+}
+.balance-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+}
+.balance-ticket {
+  border: 1px solid #768179;
+  background: #fffdf7;
+  padding: 18px;
+  box-shadow: 4px 4px 0 #d6d0c1;
+}
+.balance-ticket header,
+.balance-ticket footer {
+  display: flex;
+  justify-content: space-between;
+}
+.balance-ticket dl {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+.balance-ticket dl div {
+  border-top: 3px solid #a7b0a8;
+  padding-top: 10px;
+}
+.balance-ticket .available {
+  border-color: #d9673f;
+}
+.balance-ticket dt {
+  font-size: 12px;
+}
+.balance-ticket dd {
+  margin: 4px 0;
+  font:
+    700 1.5rem Georgia,
+    serif;
+}
+.movement-grid {
+  display: grid;
+  grid-template-columns: 1.35fr 0.9fr;
+  gap: 18px;
+}
+.movement-card {
+  border: 1px solid #28342d;
+  padding: 22px;
+  background: #eef2e9;
+}
+.movement-card.return {
+  background: #f4efe2;
+}
+.movement-card header {
+  display: flex;
+  gap: 14px;
+}
+.movement-card header > span {
+  font:
+    700 2rem Georgia,
+    serif;
+  color: #d9673f;
+}
+.movement-card h2 {
+  margin: 0;
+}
+.movement-card p {
+  margin: 4px 0 18px;
+}
+.field-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.field-grid.single {
+  grid-template-columns: 1fr;
+}
+.ledger-panel {
+  border-top: 4px solid #18201c;
+}
+.ledger-panel > header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.ledger-panel ol {
+  padding: 0;
+  list-style: none;
+}
+.ledger-panel li {
+  display: grid;
+  grid-template-columns: 150px 170px 100px 100px 100px 1fr;
+  gap: 10px;
+  padding: 12px 0;
+  border-top: 1px dashed #8b958e;
+  font-size: 13px;
+}
+.error-ticket {
+  padding: 14px;
+  border-left: 5px solid #b6422c;
+  background: #fff1eb;
+}
+.error-ticket small {
+  display: block;
+}
+.empty-note {
+  color: #66736b;
+}
+.eyebrow {
+  font-size: 11px !important;
+  letter-spacing: 0.16em;
+  font-weight: 900;
+  margin: 0;
+}
+@media (max-width: 850px) {
+  .inventory-head,
+  .movement-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+  .equation-ribbon {
+    transform: none;
+  }
+  .field-grid {
+    grid-template-columns: 1fr;
+  }
+  .ledger-panel li {
+    grid-template-columns: 1fr 1fr;
+  }
+  .query-strip {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}
+</style>

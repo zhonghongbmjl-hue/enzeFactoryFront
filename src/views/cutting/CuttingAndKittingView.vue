@@ -1,0 +1,816 @@
+<script setup lang="ts">
+import { computed, ref } from 'vue'
+import { ElMessage } from 'element-plus'
+import { cuttingApi } from '@/api/cutting'
+import { kittingApi } from '@/api/kitting'
+import { createIdempotencyAttempt } from '@/api/http'
+import type { CuttingOrder, KittingCheck, KittingRelease } from '@/types/cutting'
+import { addDecimal, compareDecimal, decimalPercent, isPositiveDecimal } from '@/utils/decimal'
+
+const cuttingQuery = ref('')
+const kittingQuery = ref('')
+const cutting = ref<CuttingOrder>()
+const kitting = ref<KittingCheck>()
+const releases = ref<KittingRelease[]>([])
+const releaseQuantity = ref('0')
+const scheduleQuantities = ref<Record<string, string>>({})
+const scheduleReferences = ref<Record<string, string>>({})
+const pending = ref(false)
+const failure = ref('')
+const traceId = ref('')
+const conservationOk = computed(
+  () =>
+    !cutting.value ||
+    compareDecimal(
+      cutting.value.inputQuantity,
+      addDecimal(
+        cutting.value.outputQuantity,
+        cutting.value.lossQuantity,
+        cutting.value.excessReturnQuantity,
+      ),
+    ) === 0,
+)
+const createForm = ref({
+  cuttingNo: '',
+  materialIssueId: '',
+  orderItemId: '',
+  skuId: '',
+  productionBatch: '',
+  sourceFabricLot: '',
+  inputQuantity: '0',
+})
+const completeForm = ref({
+  outputQuantity: '0',
+  lossQuantity: '0',
+  excessReturnQuantity: '0',
+  returnNo: '',
+})
+const bundleLines = ref([{ bundleNo: '', quantity: '0' }])
+const checkForm = ref({ orderItemId: '', skuId: '' })
+const createAttempt = createIdempotencyAttempt()
+const completeAttempt = createIdempotencyAttempt()
+const releaseAttempt = createIdempotencyAttempt()
+const scheduleAttempt = createIdempotencyAttempt()
+
+async function createCutting(): Promise<void> {
+  if (pending.value || !isPositiveDecimal(createForm.value.inputQuantity)) return
+  pending.value = true
+  failure.value = ''
+  const payload = { ...createForm.value }
+  try {
+    cutting.value = await cuttingApi.create(payload, createAttempt.keyFor(payload))
+    createAttempt.succeeded()
+    cuttingQuery.value = cutting.value.id
+    ElMessage.success('裁剪任务已创建并锁定领布投入')
+  } catch (error) {
+    createAttempt.failed(error)
+    report(error, '裁剪任务创建失败')
+  } finally {
+    pending.value = false
+  }
+}
+
+async function completeCutting(): Promise<void> {
+  if (!cutting.value || pending.value) return
+  pending.value = true
+  failure.value = ''
+  const payload = {
+    ...completeForm.value,
+    ...(isPositiveDecimal(completeForm.value.excessReturnQuantity)
+      ? { returnNo: completeForm.value.returnNo }
+      : {}),
+    bundles: bundleLines.value,
+    version: cutting.value.version,
+  }
+  try {
+    cutting.value = await cuttingApi.complete(
+      cutting.value.id,
+      payload,
+      completeAttempt.keyFor({ id: cutting.value.id, ...payload }),
+    )
+    completeAttempt.succeeded()
+    ElMessage.success('裁剪已完工，裁片包与余料来源链已落账')
+  } catch (error) {
+    completeAttempt.failed(error)
+    report(error, '裁剪完工失败')
+  } finally {
+    pending.value = false
+  }
+}
+
+async function createKitting(): Promise<void> {
+  if (pending.value) return
+  pending.value = true
+  failure.value = ''
+  try {
+    kitting.value = await kittingApi.check(checkForm.value)
+    kittingQuery.value = kitting.value.id
+    releases.value = await kittingApi.releases(kitting.value.id)
+    ElMessage.success('已按裁片实绩与冻结辅料需求重算齐套')
+  } catch (error) {
+    report(error, '齐套检查失败')
+  } finally {
+    pending.value = false
+  }
+}
+
+function report(error: unknown, fallback: string): void {
+  const candidate = error as { message?: string; traceId?: string }
+  failure.value = candidate.message || fallback
+  traceId.value = candidate.traceId || ''
+}
+
+async function loadCutting(): Promise<void> {
+  if (!cuttingQuery.value.trim()) return
+  failure.value = ''
+  try {
+    cutting.value = await cuttingApi.get(cuttingQuery.value.trim())
+  } catch (error) {
+    report(error, '裁剪任务加载失败')
+  }
+}
+
+async function loadKitting(): Promise<void> {
+  if (!kittingQuery.value.trim()) return
+  failure.value = ''
+  try {
+    ;[kitting.value, releases.value] = await Promise.all([
+      kittingApi.get(kittingQuery.value.trim()),
+      kittingApi.releases(kittingQuery.value.trim()),
+    ])
+  } catch (error) {
+    report(error, '齐套检查加载失败')
+  }
+}
+
+async function transition(action: 'release' | 'start'): Promise<void> {
+  if (!cutting.value || pending.value) return
+  pending.value = true
+  try {
+    cutting.value = await cuttingApi[action](cutting.value.id, cutting.value.version)
+    ElMessage.success(action === 'release' ? '裁剪任务已下达' : '裁剪已开工')
+  } catch (error) {
+    report(error, '裁剪状态更新失败')
+  } finally {
+    pending.value = false
+  }
+}
+
+async function releaseKitting(): Promise<void> {
+  if (!kitting.value || !isPositiveDecimal(releaseQuantity.value) || pending.value) return
+  pending.value = true
+  const payload = { id: kitting.value.id, quantity: releaseQuantity.value }
+  try {
+    await kittingApi.release(
+      kitting.value.id,
+      releaseQuantity.value,
+      releaseAttempt.keyFor(payload),
+    )
+    releaseAttempt.succeeded()
+    ElMessage.success('齐套数量已释放，可进入排产')
+    await loadKitting()
+  } catch (error) {
+    releaseAttempt.failed(error)
+    report(error, '齐套释放失败')
+  } finally {
+    pending.value = false
+  }
+}
+
+async function scheduleKitting(item: KittingRelease): Promise<void> {
+  const quantity = scheduleQuantities.value[item.id] || '0'
+  const reference = scheduleReferences.value[item.id]?.trim() || ''
+  if (!isPositiveDecimal(quantity) || !reference || pending.value) return
+  pending.value = true
+  const payload = { id: item.id, quantity, reference }
+  try {
+    await kittingApi.schedule(item.id, quantity, reference, scheduleAttempt.keyFor(payload))
+    scheduleAttempt.succeeded()
+    ElMessage.success('排产引用已占用对应齐套释放量')
+    await loadKitting()
+  } catch (error) {
+    scheduleAttempt.failed(error)
+    report(error, '齐套排产失败')
+  } finally {
+    pending.value = false
+  }
+}
+</script>
+
+<template>
+  <section class="cutting-kitting-console">
+    <header class="console-head">
+      <div>
+        <p class="eyebrow">CUT ROOM / KIT RELEASE</p>
+        <h1>裁剪与齐套</h1>
+        <p>同一条来源链，串起领布、裁片包、生产批次与可排产数量。</p>
+      </div>
+      <div class="chain-mark" aria-label="业务链路">
+        <span>领布</span><b>→</b><span>裁剪</span><b>→</b><span>齐套</span><b>→</b><span>排产</span>
+      </div>
+    </header>
+
+    <div v-if="failure" class="error-ticket" role="alert" aria-live="polite">
+      <b>{{ failure }}</b
+      ><small v-if="traceId">追踪号 {{ traceId }}</small>
+    </div>
+
+    <div class="dual-workbench">
+      <article class="work-panel cutting-panel">
+        <header>
+          <div>
+            <p class="eyebrow">FABRIC CONVERSION</p>
+            <h2>裁剪任务</h2>
+          </div>
+          <span class="panel-number">01</span>
+        </header>
+        <form
+          data-testid="create-cutting-form"
+          class="mutation-form"
+          @submit.prevent="createCutting"
+        >
+          <h3>创建裁剪任务</h3>
+          <div class="compact-fields">
+            <input v-model="createForm.cuttingNo" required placeholder="裁剪单号" />
+            <input v-model="createForm.materialIssueId" required placeholder="领料 ID" />
+            <input v-model="createForm.orderItemId" required placeholder="订单项 ID" />
+            <input v-model="createForm.skuId" required placeholder="SKU ID" />
+            <input v-model="createForm.productionBatch" required placeholder="生产批次" />
+            <input v-model="createForm.sourceFabricLot" required placeholder="来源布批" />
+            <input
+              v-model="createForm.inputQuantity"
+              required
+              inputmode="decimal"
+              placeholder="投入数量"
+            />
+          </div>
+          <button type="submit" :disabled="pending || !isPositiveDecimal(createForm.inputQuantity)">
+            创建并占用领布
+          </button>
+        </form>
+        <form class="query-strip" @submit.prevent="loadCutting">
+          <input v-model="cuttingQuery" data-testid="cutting-query" placeholder="裁剪任务 UUID" />
+          <button data-testid="load-cutting" type="button" @click="loadCutting">读取</button>
+        </form>
+
+        <template v-if="cutting">
+          <div class="state-line">
+            <code>{{ cutting.cuttingNo }}</code
+            ><b :class="cutting.status.toLowerCase()">{{ cutting.status }}</b
+            ><span>v{{ cutting.version }}</span>
+          </div>
+          <div class="equation-card" :class="{ invalid: !conservationOk }">
+            <small>数量守恒</small><strong>领布投入 = 裁片产出 + 损耗 + 余料回库</strong>
+            <div>
+              <b>{{ cutting.inputQuantity }}</b
+              ><span>=</span><b>{{ cutting.outputQuantity }}</b
+              ><span>+</span><b>{{ cutting.lossQuantity }}</b
+              ><span>+</span><b>{{ cutting.excessReturnQuantity }}</b>
+            </div>
+          </div>
+          <dl class="trace-grid">
+            <div>
+              <dt>订单项</dt>
+              <dd>
+                <code>{{ cutting.orderItemId }}</code>
+              </dd>
+            </div>
+            <div>
+              <dt>SKU</dt>
+              <dd>
+                <code>{{ cutting.skuId }}</code>
+              </dd>
+            </div>
+            <div>
+              <dt>生产批次</dt>
+              <dd>{{ cutting.productionBatch }}</dd>
+            </div>
+            <div>
+              <dt>来源布批</dt>
+              <dd>{{ cutting.sourceFabricLot }}</dd>
+            </div>
+          </dl>
+          <div class="state-actions">
+            <button
+              v-if="cutting.status === 'DRAFT'"
+              type="button"
+              :disabled="pending"
+              @click="transition('release')"
+            >
+              下达裁剪
+            </button>
+            <button
+              v-if="cutting.status === 'RELEASED'"
+              type="button"
+              :disabled="pending"
+              @click="transition('start')"
+            >
+              开始裁剪
+            </button>
+          </div>
+          <form
+            data-testid="complete-cutting-form"
+            class="mutation-form"
+            @submit.prevent="completeCutting"
+          >
+            <h3>完工与裁片包</h3>
+            <div class="compact-fields">
+              <input
+                v-model="completeForm.outputQuantity"
+                required
+                inputmode="decimal"
+                placeholder="裁片产出"
+              />
+              <input
+                v-model="completeForm.lossQuantity"
+                required
+                inputmode="decimal"
+                placeholder="损耗"
+              />
+              <input
+                v-model="completeForm.excessReturnQuantity"
+                required
+                inputmode="decimal"
+                placeholder="余料回库"
+              />
+              <input
+                v-if="isPositiveDecimal(completeForm.excessReturnQuantity)"
+                v-model="completeForm.returnNo"
+                required
+                placeholder="退料单号"
+              />
+            </div>
+            <div v-for="(line, index) in bundleLines" :key="index" class="bundle-entry">
+              <input v-model="line.bundleNo" required placeholder="裁片包号" />
+              <input v-model="line.quantity" required inputmode="decimal" placeholder="包数量" />
+              <button
+                v-if="bundleLines.length > 1"
+                type="button"
+                @click="bundleLines.splice(index, 1)"
+              >
+                移除
+              </button>
+            </div>
+            <button type="button" @click="bundleLines.push({ bundleNo: '', quantity: '0' })">
+              增加裁片包
+            </button>
+            <button type="submit" :disabled="pending || cutting.status !== 'CUTTING'">
+              确认完工
+            </button>
+          </form>
+          <section class="bundle-stack">
+            <header>
+              <h3>裁片包</h3>
+              <b>{{ cutting.bundles.length }} 包 / {{ cutting.outputQuantity }}</b>
+            </header>
+            <ol>
+              <li v-for="bundle in cutting.bundles" :key="bundle.id">
+                <span>{{ bundle.bundleNo }}</span
+                ><b>{{ bundle.quantity }}</b
+                ><code>{{ bundle.productionBatch }} · {{ bundle.sourceFabricLot }}</code>
+              </li>
+            </ol>
+          </section>
+        </template>
+        <p v-else class="empty-note">读取裁剪任务，核验投入、产出、损耗与余料回库是否平衡。</p>
+      </article>
+
+      <article class="work-panel kitting-panel">
+        <header>
+          <div>
+            <p class="eyebrow">MINIMUM READINESS</p>
+            <h2>齐套释放</h2>
+          </div>
+          <span class="panel-number">02</span>
+        </header>
+        <form
+          data-testid="create-kitting-form"
+          class="mutation-form"
+          @submit.prevent="createKitting"
+        >
+          <h3>按实绩检查齐套</h3>
+          <div class="compact-fields">
+            <input v-model="checkForm.orderItemId" required placeholder="订单项 ID" />
+            <input v-model="checkForm.skuId" required placeholder="SKU ID" />
+          </div>
+          <button type="submit" :disabled="pending">重算齐套</button>
+        </form>
+        <form class="query-strip" @submit.prevent="loadKitting">
+          <input v-model="kittingQuery" data-testid="kitting-query" placeholder="齐套检查 UUID" />
+          <button data-testid="load-kitting" type="button" @click="loadKitting">读取</button>
+        </form>
+
+        <template v-if="kitting">
+          <div class="minimum-card">
+            <small>齐套口径</small><strong>整体齐套 = min(裁片齐套, 辅料齐套)</strong>
+            <div class="ready-bars">
+              <span
+                ><i
+                  :style="{
+                    width: decimalPercent(kitting.fabricReadyQuantity, kitting.requiredQuantity),
+                  }"
+                />裁片 {{ kitting.fabricReadyQuantity }}</span
+              ><span
+                ><i
+                  :style="{
+                    width: decimalPercent(kitting.accessoryReadyQuantity, kitting.requiredQuantity),
+                  }"
+                />辅料 {{ kitting.accessoryReadyQuantity }}</span
+              >
+            </div>
+          </div>
+          <div class="release-meter">
+            <div>
+              <small>整体可齐套</small
+              ><b data-testid="overall-ready">{{ kitting.overallReadyQuantity }}</b>
+            </div>
+            <div>
+              <small>累计已释放</small><b>{{ kitting.releasedQuantity }}</b>
+            </div>
+            <div class="remainder">
+              <small>剩余可释放</small
+              ><b data-testid="release-remainder">{{ kitting.remainingQuantity }}</b>
+            </div>
+          </div>
+          <form class="release-form" @submit.prevent="releaseKitting">
+            <label
+              ><span>本次释放数量</span
+              ><input
+                v-model="releaseQuantity"
+                type="text"
+                inputmode="decimal"
+                min="0.000001"
+                :max="kitting.remainingQuantity"
+                step="0.000001" /></label
+            ><button
+              type="submit"
+              :disabled="
+                pending ||
+                !isPositiveDecimal(releaseQuantity) ||
+                compareDecimal(releaseQuantity, kitting.remainingQuantity) > 0
+              "
+            >
+              释放至排产池
+            </button>
+          </form>
+          <section class="release-history">
+            <header>
+              <h3>释放记录</h3>
+              <b>{{ releases.length }} 次</b>
+            </header>
+            <ol>
+              <li v-for="item in releases" :key="item.id">
+                <code>{{ item.id.slice(0, 8) }}</code
+                ><b>释放 {{ item.quantity }}</b
+                ><span>已排产 {{ item.scheduledQuantity }}</span
+                ><small>余 {{ item.remainingForScheduling }}</small>
+                <form
+                  class="schedule-form"
+                  :data-testid="`schedule-form-${item.id}`"
+                  @submit.prevent="scheduleKitting(item)"
+                >
+                  <input
+                    v-model="scheduleReferences[item.id]"
+                    :data-testid="`schedule-reference-${item.id}`"
+                    required
+                    maxlength="64"
+                    placeholder="稳定排产引用 / 批次号"
+                  />
+                  <input
+                    v-model="scheduleQuantities[item.id]"
+                    :data-testid="`schedule-quantity-${item.id}`"
+                    required
+                    inputmode="decimal"
+                    placeholder="排产数量"
+                  />
+                  <button
+                    :data-testid="`schedule-${item.id}`"
+                    type="submit"
+                    :disabled="
+                      pending ||
+                      !scheduleReferences[item.id]?.trim() ||
+                      !isPositiveDecimal(scheduleQuantities[item.id] || '0') ||
+                      compareDecimal(
+                        scheduleQuantities[item.id] || '0',
+                        item.remainingForScheduling,
+                      ) > 0
+                    "
+                  >
+                    占用排产
+                  </button>
+                </form>
+              </li>
+            </ol>
+          </section>
+        </template>
+        <p v-else class="empty-note">读取齐套检查，只允许释放裁片与辅料共同满足的最小数量。</p>
+      </article>
+    </div>
+  </section>
+</template>
+
+<style scoped>
+.cutting-kitting-console {
+  display: grid;
+  gap: 22px;
+  color: #162019;
+}
+.console-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: end;
+  padding: 28px;
+  border-bottom: 5px solid #17231c;
+  background: linear-gradient(135deg, #f3eddf, #e5eadf);
+}
+.console-head h1 {
+  font:
+    700 clamp(2.2rem, 5vw, 4.8rem)/0.9 Georgia,
+    serif;
+  margin: 10px 0;
+}
+.chain-mark {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex-wrap: wrap;
+}
+.chain-mark span {
+  border: 1px solid #17231c;
+  padding: 8px 10px;
+  background: #fffdf7;
+}
+.chain-mark b {
+  color: #d75f38;
+}
+.dual-workbench {
+  display: grid;
+  grid-template-columns: 1.08fr 0.92fr;
+  gap: 18px;
+}
+.work-panel {
+  border: 1px solid #26342c;
+  padding: 22px;
+  background: #fffdf7;
+  box-shadow: 6px 6px 0 #cfd5ca;
+}
+.work-panel.kitting-panel {
+  background: #eef2e9;
+  box-shadow: 6px 6px 0 #d75f38;
+}
+.work-panel > header,
+.bundle-stack header,
+.release-history header {
+  display: flex;
+  justify-content: space-between;
+  align-items: start;
+}
+.work-panel h2 {
+  font:
+    700 2rem Georgia,
+    serif;
+  margin: 5px 0 16px;
+}
+.panel-number {
+  font:
+    700 3.5rem/0.8 Georgia,
+    serif;
+  color: #b8c0b8;
+}
+.query-strip {
+  display: flex;
+  margin-bottom: 18px;
+}
+.mutation-form {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 16px;
+  padding: 14px;
+  border: 1px dashed #78837b;
+  background: #f5f1e6;
+}
+.mutation-form h3 {
+  margin: 0;
+}
+.compact-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.compact-fields input,
+.bundle-entry input {
+  min-width: 0;
+  padding: 9px;
+  border: 1px solid #657168;
+}
+.bundle-entry {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
+  gap: 8px;
+}
+.mutation-form button {
+  justify-self: start;
+  border: 1px solid #17231c;
+  background: #fffdf7;
+  padding: 9px 12px;
+  font-weight: 800;
+}
+.query-strip input {
+  flex: 1;
+  min-width: 0;
+  padding: 11px;
+  border: 1px solid #536058;
+  background: #fff;
+}
+.query-strip button,
+.state-actions button,
+.release-form button {
+  border: 0;
+  background: #17231c;
+  color: #fff;
+  padding: 11px 15px;
+  font-weight: 800;
+}
+.state-line {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0;
+  border-top: 1px dashed #778179;
+  border-bottom: 1px dashed #778179;
+}
+.state-line b {
+  margin-left: auto;
+  color: #d75f38;
+}
+.equation-card,
+.minimum-card {
+  margin: 18px 0;
+  padding: 18px;
+  background: #17231c;
+  color: #f9f5ea;
+}
+.equation-card small,
+.equation-card strong,
+.minimum-card small,
+.minimum-card strong {
+  display: block;
+}
+.equation-card strong,
+.minimum-card strong {
+  font-family: Georgia, serif;
+  font-size: 1.15rem;
+  margin: 5px 0 14px;
+}
+.equation-card > div {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr auto 1fr auto 1fr;
+  align-items: center;
+  text-align: center;
+}
+.equation-card > div b {
+  font:
+    700 1.6rem Georgia,
+    serif;
+  color: #f4c16c;
+}
+.trace-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.trace-grid div {
+  border-left: 3px solid #d75f38;
+  padding-left: 10px;
+}
+.trace-grid dt {
+  font-size: 11px;
+  font-weight: 900;
+}
+.trace-grid dd {
+  margin: 4px 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.state-actions {
+  margin: 14px 0;
+}
+.bundle-stack,
+.release-history {
+  border-top: 2px solid #17231c;
+  margin-top: 18px;
+}
+.bundle-stack ol,
+.release-history ol {
+  list-style: none;
+  padding: 0;
+}
+.bundle-stack li {
+  display: grid;
+  grid-template-columns: 70px 70px 1fr;
+  gap: 8px;
+  border-top: 1px dashed #8b948e;
+  padding: 10px 0;
+}
+.ready-bars {
+  display: grid;
+  gap: 8px;
+}
+.ready-bars span {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  padding: 7px;
+  border: 1px solid #718078;
+}
+.ready-bars i {
+  position: absolute;
+  z-index: -1;
+  inset: 0 auto 0 0;
+  background: #d75f38;
+}
+.release-meter {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+.release-meter div {
+  padding: 13px;
+  border: 1px solid #7a867d;
+}
+.release-meter small,
+.release-meter b {
+  display: block;
+}
+.release-meter b {
+  font:
+    700 1.8rem Georgia,
+    serif;
+}
+.release-meter .remainder {
+  background: #f4c16c;
+}
+.release-form {
+  display: flex;
+  gap: 10px;
+  align-items: end;
+  margin: 16px 0;
+}
+.release-form label {
+  flex: 1;
+}
+.release-form span {
+  display: block;
+  font-size: 12px;
+  font-weight: 900;
+}
+.release-form input {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 10px;
+  border: 1px solid #566259;
+}
+.release-history li {
+  display: grid;
+  grid-template-columns: 75px 1fr 1fr auto;
+  gap: 8px;
+  padding: 10px 0;
+  border-top: 1px dashed #849087;
+}
+.empty-note {
+  color: #68746c;
+  padding: 30px 0;
+}
+.error-ticket {
+  padding: 14px;
+  border-left: 5px solid #b6422c;
+  background: #fff1eb;
+}
+.error-ticket small {
+  display: block;
+}
+.eyebrow {
+  font-size: 11px !important;
+  letter-spacing: 0.16em;
+  font-weight: 900;
+  margin: 0;
+}
+@media (max-width: 960px) {
+  .console-head,
+  .dual-workbench {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 20px;
+  }
+  .release-meter {
+    grid-template-columns: 1fr;
+  }
+  .release-form {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .trace-grid {
+    grid-template-columns: 1fr;
+  }
+}
+</style>
