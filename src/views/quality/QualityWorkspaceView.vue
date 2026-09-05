@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import SelectField from '@/components/form/SelectField.vue'
 import { computed, onUnmounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { qualityApi } from '@/api/quality'
@@ -481,41 +482,56 @@ onUnmounted(() => {
         <p class="kicker">QUALITY LEDGER / 成品质量闭环</p>
         <h1>品质工作台</h1>
       </div>
-      <form data-testid="load-quality" class="lookup" @submit.prevent="loadFacts">
+      <el-form data-testid="load-quality" class="lookup" @submit.prevent="loadFacts">
         <label
-          >销售订单 ID<input
+          >销售订单 ID
+          <el-input
             v-model="salesOrderId"
             name="salesOrderId"
             autocomplete="off"
             :disabled="mutationBusy"
-        /></label>
-        <button type="submit" :disabled="loading || mutationBusy">
+          />
+        </label>
+        <el-button type="primary" native-type="submit" :disabled="loading || mutationBusy">
           {{ loading ? '读取中…' : '读取质量事实' }}
-        </button>
-      </form>
+        </el-button>
+      </el-form>
     </header>
-    <p v-if="errorMessage" role="alert" class="alert">{{ errorMessage }}</p>
-    <div v-if="mutationFlight" class="sync-alert" data-testid="quality-sync-pending">
+    <el-alert
+      v-if="errorMessage"
+      :title="errorMessage"
+      type="error"
+      :closable="false"
+      show-icon
+      role="alert"
+    />
+    <el-alert
+      v-if="mutationFlight"
+      class="sync-alert"
+      data-testid="quality-sync-pending"
+      type="warning"
+      :closable="false"
+      show-icon
+      role="status"
+    >
       <b>{{ syncMessage || '已入账，正在读取权威质量事实' }}</b>
-      <button
+      <el-button
         v-if="mutationFlight.status !== 'CONFIRMED_PENDING_REFRESH'"
         data-testid="retry-quality-mutation"
-        type="button"
         :disabled="confirmationRetryBusy"
         @click="retryQualityMutation"
       >
         {{ confirmationRetryBusy ? '确认中…' : '用原请求重试确认' }}
-      </button>
-      <button
+      </el-button>
+      <el-button
         v-else
         data-testid="retry-quality-refresh"
-        type="button"
         :disabled="loading"
         @click="retryQualityRefresh"
       >
         {{ loading ? '同步中…' : '重试刷新' }}
-      </button>
-    </div>
+      </el-button>
+    </el-alert>
 
     <template v-if="orderFacts">
       <div class="fact-strip">
@@ -572,104 +588,128 @@ onUnmounted(() => {
       </section>
 
       <label class="work-order-picker"
-        >操作工单<select
+        >操作工单<SelectField
           v-model="selectedWorkOrderId"
           name="selectedWorkOrderId"
           :disabled="mutationBusy"
+          :options="
+            workOrderOptions.map((item) => ({
+              value: item.workOrderId,
+              label: `${item.workOrderId} · SKU ${item.skuId} · 批次 ${item.productionBatchId}`,
+            }))
+          "
           @change="selectWorkOrder"
-        >
-          <option
-            v-for="item in workOrderOptions"
-            :key="item.workOrderId"
-            :value="item.workOrderId"
-          >
-            {{ item.workOrderId }} · SKU {{ item.skuId }} · 批次 {{ item.productionBatchId }}
-          </option>
-        </select></label
-      >
+      /></label>
 
       <div v-if="facts" class="work-grid">
-        <form data-testid="trim-form" class="action-card" @submit.prevent="submitTrimming">
+        <el-form data-testid="trim-form" class="action-card" @submit.prevent="submitTrimming">
           <div class="card-no">01</div>
           <h2>后整入账 · 待后整</h2>
           <p>来源：生产完成账本；可用 {{ facts.trimmingAvailableQuantity }}</p>
           <label
-            >后整数量<input
+            >后整数量
+            <el-input
               v-model="trimQuantity"
               name="trimQuantity"
               inputmode="decimal"
               placeholder="0.000000"
               required
               :disabled="mutationBusy"
-          /></label>
-          <button data-testid="trim-submit" type="submit" :disabled="trimBusy || mutationBusy">
+            />
+          </label>
+          <el-button
+            data-testid="trim-submit"
+            type="primary"
+            native-type="submit"
+            :disabled="trimBusy || mutationBusy"
+          >
             {{ trimBusy ? '处理中…' : '确认后整' }}
-          </button>
-        </form>
+          </el-button>
+        </el-form>
 
-        <form data-testid="inspection-form" class="action-card" @submit.prevent="submitInspection">
+        <el-form
+          data-testid="inspection-form"
+          class="action-card"
+          @submit.prevent="submitInspection"
+        >
           <div class="card-no">02</div>
           <h2>唯一正式成品质检</h2>
           <p>类型固定 FINISHED_PRODUCT；方式选择抽检或全检；提交 = 通过 + 失败</p>
           <label
-            >检验方式<select
+            >检验方式<SelectField
               v-model="inspectionMethod"
               name="inspectionMethod"
-              required
+              aria-required="true"
               :disabled="mutationBusy"
-            >
-              <option value="SAMPLING">抽检</option>
-              <option value="FULL">全检</option>
-            </select></label
-          >
+              :options="[
+                { label: '抽检', value: 'SAMPLING' },
+                { label: '全检', value: 'FULL' },
+              ]"
+          /></label>
           <div class="quantity-row">
             <label
-              >提交<input
+              >提交
+              <el-input
                 v-model="submittedQuantity"
                 name="submittedQuantity"
                 required
-                :disabled="mutationBusy" /></label
-            ><label
-              >通过<input
+                :disabled="mutationBusy"
+              />
+            </label>
+            <label
+              >通过
+              <el-input
                 v-model="passedQuantity"
                 name="passedQuantity"
                 required
-                :disabled="mutationBusy" /></label
-            ><label
-              >失败<input
+                :disabled="mutationBusy"
+              />
+            </label>
+            <label
+              >失败
+              <el-input
                 v-model="failedQuantity"
                 name="failedQuantity"
                 required
                 :disabled="mutationBusy"
-            /></label>
+              />
+            </label>
           </div>
           <label
-            >缺陷代码<input v-model="defectCode" name="defectCode" :disabled="mutationBusy"
+            >缺陷代码<el-input v-model="defectCode" name="defectCode" :disabled="mutationBusy"
           /></label>
           <label
-            >处置说明<input v-model="disposition" name="disposition" :disabled="mutationBusy"
+            >处置说明<el-input v-model="disposition" name="disposition" :disabled="mutationBusy"
           /></label>
-          <button
+          <el-button
             data-testid="inspection-submit"
-            type="submit"
+            type="primary"
+            native-type="submit"
             :disabled="inspectionBusy || mutationBusy"
           >
             {{ inspectionBusy ? '处理中…' : '冻结检验批次' }}
-          </button>
-        </form>
+          </el-button>
+        </el-form>
 
-        <form data-testid="rework-form" class="action-card" @submit.prevent="completeRework">
+        <el-form data-testid="rework-form" class="action-card" @submit.prevent="completeRework">
           <div class="card-no">03</div>
           <h2>返工回检</h2>
           <p>只回到来源正式检验类型，并生成新版本。</p>
           <label
-            >返工单<select v-model="selectedReworkId" name="reworkOrderId" :disabled="mutationBusy">
-              <option value="">暂无待办</option>
-              <option v-for="item in pendingReworks" :key="item.id" :value="item.id">
-                {{ item.id }} · {{ item.quantity }}
-              </option>
-            </select></label
-          >
+            >返工单
+            <SelectField
+              v-model="selectedReworkId"
+              name="reworkOrderId"
+              placeholder="暂无待办"
+              :disabled="mutationBusy"
+              :options="
+                pendingReworks.map((item) => ({
+                  label: `${item.id} · ${item.quantity}`,
+                  value: item.id,
+                }))
+              "
+            />
+          </label>
           <p v-if="selectedRework" class="lineage">
             来源检验 {{ selectedRework.sourceInspectionId }} ·
             {{ methodLabel(selectedRework.inspectionMethod) }} · 链深
@@ -679,23 +719,23 @@ onUnmounted(() => {
             <b>历史方式待补录</b>
             <span>旧记录不能推断抽检/全检，须留下独立审计事实后才能回检。</span>
             <label
-              >补录方式<select
+              >补录方式<SelectField
                 v-model="legacyBridgeMethod"
                 name="legacyBridgeMethod"
                 :disabled="mutationBusy"
-              >
-                <option value="SAMPLING">抽检</option>
-                <option value="FULL">全检</option>
-              </select></label
-            >
-            <button
+                :options="[
+                  { label: '抽检', value: 'SAMPLING' },
+                  { label: '全检', value: 'FULL' },
+                ]"
+            /></label>
+            <el-button
               data-testid="legacy-bridge-submit"
-              type="button"
+              type="primary"
               :disabled="legacyBridgeBusy || mutationBusy"
               @click="bridgeLegacyRework"
             >
               {{ legacyBridgeBusy ? '补录中…' : '确认补录并留痕' }}
-            </button>
+            </el-button>
           </div>
           <p v-else-if="selectedRework?.legacyReworkBridgeId" class="lineage">
             已补录 {{ methodLabel(selectedRework.remediatedInspectionMethod!) }} · 审计事实
@@ -703,33 +743,41 @@ onUnmounted(() => {
           </p>
           <div class="quantity-row">
             <label
-              >回检通过<input
+              >回检通过
+              <el-input
                 v-model="reworkPassedQuantity"
                 name="reworkPassedQuantity"
                 required
-                :disabled="mutationBusy" /></label
-            ><label
-              >再次失败<input
+                :disabled="mutationBusy"
+              />
+            </label>
+            <label
+              >再次失败
+              <el-input
                 v-model="reworkFailedQuantity"
                 name="reworkFailedQuantity"
                 required
                 :disabled="mutationBusy"
-            /></label>
+              />
+            </label>
           </div>
           <label
-            >处置说明<input
+            >处置说明
+            <el-input
               v-model="reworkDisposition"
               name="reworkDisposition"
               :disabled="mutationBusy"
-          /></label>
-          <button
+            />
+          </label>
+          <el-button
             data-testid="rework-submit"
-            type="submit"
+            type="primary"
+            native-type="submit"
             :disabled="reworkBusy || !selectedRework || legacyBridgeRequired || mutationBusy"
           >
             {{ reworkBusy ? '处理中…' : '完成并生成回检批次' }}
-          </button>
-        </form>
+          </el-button>
+        </el-form>
       </div>
 
       <section v-if="facts" class="ledger">
@@ -767,21 +815,19 @@ onUnmounted(() => {
           >
         </div>
         <div class="ledger-title" data-testid="quality-history-page">
-          <button
-            type="button"
+          <el-button
             :disabled="mutationBusy || loading || facts.historyPage.page === 0"
             @click="loadHistoryPage(facts.historyPage.page - 1)"
           >
             上一页
-          </button>
+          </el-button>
           <span>第 {{ facts.historyPage.page + 1 }} 页 · 每页 {{ facts.historyPage.size }}</span>
-          <button
-            type="button"
+          <el-button
             :disabled="mutationBusy || loading || !facts.historyPage.hasNext"
             @click="loadHistoryPage(facts.historyPage.page + 1)"
           >
             下一页
-          </button>
+          </el-button>
         </div>
       </section>
     </template>
@@ -828,17 +874,8 @@ onUnmounted(() => {
   font-size: 12px;
   font-weight: 700;
 }
-.lookup input {
-  min-width: 300px;
-}
-.lookup input,
-.action-card input,
-.action-card select {
-  border: 1px solid #a8afa9;
-  background: #fff;
-  padding: 10px 12px;
-  color: inherit;
-  border-radius: 2px;
+.lookup .el-input {
+  min-width: min(300px, 100%);
 }
 .quality-workspace button {
   border: 0;
@@ -933,11 +970,6 @@ onUnmounted(() => {
   margin-bottom: 16px;
   font-size: 12px;
   font-weight: 800;
-}
-.work-order-picker select {
-  border: 1px solid #a8afa9;
-  background: white;
-  padding: 10px 12px;
 }
 .action-card {
   position: relative;

@@ -11,5 +11,10 @@ export default defineConfig({
     exclude: ['e2e/**', 'node_modules/**', 'dist/**'],
     clearMocks: true,
     restoreMocks: true,
+    server: {
+      deps: {
+        inline: ['element-plus'],
+      },
+    },
   },
 })

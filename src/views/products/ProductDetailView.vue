@@ -197,49 +197,48 @@ onMounted(load)
         <span class="product-state" :class="product.status.toLowerCase()">{{
           product.status
         }}</span>
-        <button
+        <el-button
           v-if="canManage && product.status === 'DRAFT'"
           data-testid="edit-product"
-          type="button"
-          class="outline-action"
           @click="openProductEdit"
         >
           编辑草稿
-        </button>
-        <button
+        </el-button>
+        <el-button
           v-if="canApprove && product.status === 'DRAFT'"
-          type="button"
-          class="outline-action"
           :disabled="!!pendingProductAction"
           @click="productAction('activate')"
         >
           审核上架
-        </button>
-        <button
+        </el-button>
+        <el-button
           v-if="canManage && product.status === 'ACTIVE'"
-          type="button"
-          class="outline-action"
           :disabled="!!pendingProductAction"
           @click="productAction('deactivate')"
         >
           停用
-        </button>
-        <button
+        </el-button>
+        <el-button
           v-if="canManage && product.status === 'INACTIVE'"
-          type="button"
-          class="outline-action"
           :disabled="!!pendingProductAction"
           @click="productAction('reopen')"
         >
           重开草稿
-        </button>
+        </el-button>
       </div>
     </header>
 
-    <div v-if="failure" class="master-error" role="alert" aria-live="polite">
-      <b>{{ failure }}</b
-      ><span v-if="traceId">追踪号 {{ traceId }}</span>
-    </div>
+    <el-alert
+      v-if="failure"
+      :title="failure"
+      type="error"
+      :closable="false"
+      show-icon
+      role="alert"
+      aria-live="polite"
+    >
+      <span v-if="traceId">追踪号 {{ traceId }}</span>
+    </el-alert>
 
     <ol class="status-timeline" aria-label="产品状态时间线">
       <li class="done"><b>01</b><span>产品草稿</span></li>
@@ -254,14 +253,14 @@ onMounted(load)
             <p class="eyebrow">SKU MATRIX</p>
             <h2>颜色 × 尺码矩阵</h2>
           </div>
-          <button
+          <el-button
             v-if="canManage && product.status === 'DRAFT'"
-            type="button"
-            class="table-action"
+            link
+            type="primary"
             @click="openSku()"
           >
             ＋ 新增SKU
-          </button>
+          </el-button>
         </header>
         <section v-for="fit in fits" :key="fit" class="sku-fit-group">
           <h3>版型 {{ fit || '默认' }}</h3>
@@ -283,22 +282,22 @@ onMounted(load)
           <li v-for="sku in skus" :key="sku.id">
             <code>{{ sku.skuCode }}</code
             ><span>{{ sku.colorCode }} / {{ sku.size }} / {{ sku.fit }}</span>
-            <button
+            <el-button
               v-if="canManage && product.status === 'DRAFT'"
-              type="button"
-              class="table-action"
+              link
+              type="primary"
               @click="openSku(sku)"
             >
               编辑
-            </button>
-            <button
+            </el-button>
+            <el-button
               v-if="canManage && product.status === 'DRAFT'"
-              type="button"
-              class="table-action"
+              link
+              type="primary"
               @click="setSkuActive(sku)"
             >
               {{ sku.active ? '停用' : '启用' }}
-            </button>
+            </el-button>
           </li>
         </ul>
         <p v-if="skus.length === 0" class="panel-empty">
@@ -311,14 +310,14 @@ onMounted(load)
             <p class="eyebrow">BOM HISTORY</p>
             <h2>版次履历</h2>
           </div>
-          <button
+          <el-button
             v-if="canManage && product.status === 'DRAFT'"
-            type="button"
-            class="table-action"
+            link
+            type="primary"
             @click="bomDrawer = true"
           >
             ＋ 新建版本
-          </button>
+          </el-button>
         </header>
         <ul class="bom-history">
           <li v-for="bom in boms" :key="bom.id">
@@ -333,68 +332,91 @@ onMounted(load)
         </ul>
         <p v-if="boms.length === 0" class="panel-empty">尚未建立BOM版本。</p>
         <nav v-if="bomTotalPages > 1" class="product-toolbar" aria-label="BOM历史分页">
-          <button
-            type="button"
-            class="table-action"
-            :disabled="bomPage === 0"
-            @click="changeBomPage(bomPage - 1)"
-          >
+          <el-button :disabled="bomPage === 0" @click="changeBomPage(bomPage - 1)">
             上一页
-          </button>
+          </el-button>
           <span>第 {{ bomPage + 1 }} / {{ bomTotalPages }} 页</span>
-          <button
-            type="button"
-            class="table-action"
-            :disabled="bomPage + 1 >= bomTotalPages"
-            @click="changeBomPage(bomPage + 1)"
-          >
+          <el-button :disabled="bomPage + 1 >= bomTotalPages" @click="changeBomPage(bomPage + 1)">
             下一页
-          </button>
+          </el-button>
         </nav>
       </article>
     </div>
-    <el-drawer v-model="productDrawer" title="编辑产品草稿" size="min(560px, 94vw)"
-      ><form class="master-form" @submit.prevent="saveProduct">
-        <label>款号<input v-model="productForm.styleNo" required maxlength="40" /></label
-        ><label>品名<input v-model="productForm.name" required maxlength="120" /></label
-        ><label>品牌<input v-model="productForm.brand" maxlength="80" /></label
-        ><label>系列<input v-model="productForm.series" maxlength="80" /></label
-        ><label>类别<input v-model="productForm.category" maxlength="80" /></label
-        ><label>季节<input v-model="productForm.season" maxlength="40" /></label
-        ><label
-          >目标价格<input
-            v-model.number="productForm.targetPrice"
-            type="number"
-            min="0"
-            step="0.01" /></label
-        ><label>版型<input v-model="productForm.fit" maxlength="80" /></label>
-        <button class="primary-action" type="submit"><span>保存产品草稿</span><b>→</b></button>
-      </form></el-drawer
-    >
+    <el-drawer v-model="productDrawer" title="编辑产品草稿" size="min(560px, 94vw)">
+      <el-form class="master-form" label-position="top" @submit.prevent="saveProduct">
+        <el-form-item label="款号">
+          <el-input v-model="productForm.styleNo" required maxlength="40" />
+        </el-form-item>
+        <el-form-item label="品名">
+          <el-input v-model="productForm.name" required maxlength="120" />
+        </el-form-item>
+        <el-form-item label="品牌">
+          <el-input v-model="productForm.brand" maxlength="80" />
+        </el-form-item>
+        <el-form-item label="系列">
+          <el-input v-model="productForm.series" maxlength="80" />
+        </el-form-item>
+        <el-form-item label="类别">
+          <el-input v-model="productForm.category" maxlength="80" />
+        </el-form-item>
+        <el-form-item label="季节">
+          <el-input v-model="productForm.season" maxlength="40" />
+        </el-form-item>
+        <el-form-item label="目标价格">
+          <el-input v-model.number="productForm.targetPrice" type="number" min="0" step="0.01" />
+        </el-form-item>
+        <el-form-item label="版型">
+          <el-input v-model="productForm.fit" maxlength="80" />
+        </el-form-item>
+        <el-button type="primary" native-type="submit">保存产品草稿</el-button>
+      </el-form>
+    </el-drawer>
     <el-drawer
       v-model="skuDrawer"
       :title="editingSkuId ? '编辑SKU组合' : '新增SKU组合'"
-      size="min(520px, 94vw)"
-      ><form class="master-form" @submit.prevent="createSku">
-        <label>SKU编码<input v-model="skuForm.skuCode" required maxlength="64" /></label
-        ><label>颜色<input v-model="skuForm.color" required maxlength="80" /></label
-        ><label>色号<input v-model="skuForm.colorCode" required maxlength="40" /></label
-        ><label>尺码<input v-model="skuForm.size" required maxlength="24" /></label
-        ><label>版型<input v-model="skuForm.fit" maxlength="80" /></label
-        ><button class="primary-action" type="submit"><span>保存SKU</span><b>→</b></button>
-      </form></el-drawer
+      size="min(480px, 94vw)"
     >
-    <el-drawer v-model="bomDrawer" title="新建BOM版本" size="min(520px, 94vw)"
-      ><form class="master-form" @submit.prevent="createBom">
-        <label>版本号<input v-model="bomForm.versionNo" required maxlength="40" /></label
-        ><label>版本名称<input v-model="bomForm.name" required maxlength="120" /></label>
+      <el-form class="master-form" label-position="top" @submit.prevent="createSku">
+        <el-form-item label="SKU编码">
+          <el-input v-model="skuForm.skuCode" required maxlength="64" />
+        </el-form-item>
+        <el-form-item label="颜色">
+          <el-input v-model="skuForm.color" required maxlength="80" />
+        </el-form-item>
+        <el-form-item label="色号">
+          <el-input v-model="skuForm.colorCode" required maxlength="40" />
+        </el-form-item>
+        <el-form-item label="尺码">
+          <el-input v-model="skuForm.size" required maxlength="24" />
+        </el-form-item>
+        <el-form-item label="版型">
+          <el-input v-model="skuForm.fit" maxlength="80" />
+        </el-form-item>
+        <el-button type="primary" native-type="submit">保存SKU</el-button>
+      </el-form>
+    </el-drawer>
+    <el-drawer v-model="bomDrawer" title="新建BOM版本" size="min(480px, 94vw)">
+      <el-form class="master-form" label-position="top" @submit.prevent="createBom">
+        <el-form-item label="版本号">
+          <el-input v-model="bomForm.versionNo" required maxlength="40" />
+        </el-form-item>
+        <el-form-item label="版本名称">
+          <el-input v-model="bomForm.name" required maxlength="120" />
+        </el-form-item>
         <p class="panel-empty">创建后进入物料编辑器录入面料、辅料用量与损耗。</p>
-        <button class="primary-action" type="submit"><span>建立BOM草稿</span><b>→</b></button>
-      </form></el-drawer
-    >
+        <el-button type="primary" native-type="submit">建立BOM草稿</el-button>
+      </el-form>
+    </el-drawer>
   </section>
-  <div v-else-if="failure" class="master-error" role="alert" aria-live="polite">
-    <b>{{ failure }}</b
-    ><span v-if="traceId">追踪号 {{ traceId }}</span>
-  </div>
+  <el-alert
+    v-else-if="failure"
+    :title="failure"
+    type="error"
+    :closable="false"
+    show-icon
+    role="alert"
+    aria-live="polite"
+  >
+    <span v-if="traceId">追踪号 {{ traceId }}</span>
+  </el-alert>
 </template>

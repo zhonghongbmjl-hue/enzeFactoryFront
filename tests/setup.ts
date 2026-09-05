@@ -1,7 +1,14 @@
-import { afterEach } from 'vitest'
+import { afterEach, beforeEach } from 'vitest'
 import { config } from '@vue/test-utils'
+import { createPinia, setActivePinia } from 'pinia'
+import ElementPlus from 'element-plus'
 
-config.global.stubs = { transition: false, 'el-icon': true }
+config.global.plugins = [ElementPlus]
+config.global.stubs = { transition: false }
+
+beforeEach(() => {
+  setActivePinia(createPinia())
+})
 
 afterEach(() => {
   window.sessionStorage.clear()

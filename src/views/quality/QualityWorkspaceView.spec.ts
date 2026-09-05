@@ -30,6 +30,14 @@ const LEGACY_REWORK_ID = '9d2f4a1b-58c7-4fac-97a6-3024caf89b36'
 const TENANT_ID = '7e179539-02b7-4190-bcad-83edcbb66a81'
 const USER_ID = 'a8e88635-c2db-48ce-a384-fec40cd75cb4'
 
+function selectField(wrapper: ReturnType<typeof mount>, name: string) {
+  const field = wrapper
+    .findAllComponents({ name: 'SelectField' })
+    .find((item) => item.props('name') === name)
+  if (!field) throw new Error(`SelectField [name="${name}"] not found`)
+  return field
+}
+
 const aggregate = {
   salesOrderId: SALES_ORDER_ID,
   workOrderId: WORK_ORDER_ID,
@@ -281,8 +289,10 @@ describe('质量工作台', () => {
       inspectionMethod: 'FULL',
       defectCode: ' seam:01 ',
       disposition: '车间返修',
-    }))
-      await wrapper.get(`[name="${name}"]`).setValue(value)
+    })) {
+      if (name === 'inspectionMethod') await selectField(wrapper, name).setValue(value)
+      else await wrapper.get(`[name="${name}"]`).setValue(value)
+    }
     await wrapper.get('[data-testid="inspection-form"]').trigger('submit')
     await flushPromises()
     expect(qualityApi.inspect).toHaveBeenCalledWith(
@@ -326,7 +336,7 @@ describe('质量工作台', () => {
 
     expect(wrapper.text()).toContain('历史方式待补录')
     expect(wrapper.get('[data-testid="rework-submit"]').attributes('disabled')).toBeDefined()
-    await wrapper.get('[name="legacyBridgeMethod"]').setValue('FULL')
+    await selectField(wrapper, 'legacyBridgeMethod').setValue('FULL')
     await wrapper.get('[data-testid="legacy-bridge-submit"]').trigger('click')
     await flushPromises()
 
@@ -446,7 +456,7 @@ describe('质量工作台', () => {
       }
       await wrapper.get('[name="salesOrderId"]').setValue('sales-2')
       await wrapper.get('[data-testid="load-quality"]').trigger('submit')
-      await wrapper.get('[name="selectedWorkOrderId"]').setValue('wo-2')
+      await selectField(wrapper, 'selectedWorkOrderId').setValue('wo-2')
 
       expect(qualityApi.trim).toHaveBeenCalledTimes(mutation === 'trimming' ? 1 : 0)
       expect(qualityApi.inspect).toHaveBeenCalledTimes(mutation === 'inspection' ? 1 : 0)
@@ -485,7 +495,7 @@ describe('质量工作台', () => {
       expect(qualityApi.aggregateOrder).toHaveBeenNthCalledWith(3, SALES_ORDER_ID)
       expect(qualityApi.aggregate).toHaveBeenNthCalledWith(2, WORK_ORDER_ID)
       expect(wrapper.find('[data-testid="quality-sync-pending"]').exists()).toBe(false)
-      expect((wrapper.get('[name="salesOrderId"]').element as HTMLInputElement).value).toBe(
+      expect(wrapper.findAllComponents({ name: 'ElInput' })[0]?.props('modelValue')).toBe(
         SALES_ORDER_ID,
       )
       expect(mutationCallCount(mutation)).toBe(1)

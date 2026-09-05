@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import SelectField from '@/components/form/SelectField.vue'
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import EvidenceUploader from '@/components/production/EvidenceUploader.vue'
 import { productionEvidenceApi } from '@/api/production'
@@ -183,25 +184,26 @@ onBeforeUnmount(() => {
 
     <div v-if="correctionRequired" class="correction-box">
       <b>上版自检未通过，必须先登记纠正措施</b>
-      <textarea
+      <el-input
         v-model="correctionDescription"
+        type="textarea"
         maxlength="500"
         placeholder="说明设备、工艺或人员纠正措施"
       />
-      <button
-        type="button"
+      <el-button
+        type="primary"
         :disabled="correctionPending || !correctionDescription.trim()"
         @click="createCorrection"
       >
         登记纠正
-      </button>
+      </el-button>
     </div>
     <div v-else-if="correctionOpen" class="correction-box open">
       <b>纠正执行中</b>
       <p>{{ latestInspection?.correction?.description }}</p>
-      <button type="button" :disabled="correctionPending" @click="completeCorrection">
+      <el-button type="primary" :disabled="correctionPending" @click="completeCorrection">
         确认纠正完成
-      </button>
+      </el-button>
     </div>
 
     <div v-if="canInspect" class="inspection-workspace">
@@ -214,33 +216,47 @@ onBeforeUnmount(() => {
       />
       <div class="inspection-form">
         <label
-          >判定<select v-model="result">
-            <option value="PASSED">通过</option>
-            <option value="FAILED">不通过</option>
-          </select></label
-        >
-        <label>巡检人<input v-model.trim="inspector" name="inspector" maxlength="120" /></label>
+          >判定
+          <SelectField
+            v-model="result"
+            aria-label="巡检判定"
+            :options="[
+              { label: '通过', value: 'PASSED' },
+              { label: '不通过', value: 'FAILED' },
+            ]"
+          />
+        </label>
+        <label>巡检人<el-input v-model.trim="inspector" name="inspector" maxlength="120" /></label>
         <label class="wide"
-          >备注<textarea
+          >备注
+          <el-input
             v-model.trim="remarks"
+            type="textarea"
             maxlength="500"
             placeholder="记录部位、工序和观察结果"
           />
         </label>
         <p>上传对象只进入租户临时区；提交后由服务端复验并冻结，浏览器不会获得证据桶写入凭据。</p>
-        <button
+        <el-button
           data-testid="inspection-submit"
-          type="button"
+          type="primary"
           :disabled="!canSubmit"
           @click="submitInspection"
         >
           {{ submitting ? '冻结中…' : '提交并冻结证据' }}
-        </button>
+        </el-button>
       </div>
     </div>
     <p v-else class="locked">工单下达后才可开展过程自检。</p>
     <p v-if="loading">自检事实读取中…</p>
-    <p v-if="errorMessage" class="error">{{ errorMessage }}</p>
+    <el-alert
+      v-if="errorMessage"
+      :title="errorMessage"
+      type="error"
+      :closable="false"
+      show-icon
+      role="alert"
+    />
   </section>
 </template>
 
@@ -334,37 +350,10 @@ label {
 .inspection-form button {
   grid-column: 1 / -1;
 }
-input,
-select,
-textarea {
-  box-sizing: border-box;
-  width: 100%;
-  border: 1px solid #aebeba;
-  border-radius: 7px;
-  padding: 9px;
-  background: #fff;
-}
-textarea {
-  min-height: 70px;
-  resize: vertical;
-}
 .inspection-form p {
   margin: 0;
   color: #657874;
   font-size: 12px;
-}
-button {
-  border: 0;
-  border-radius: 8px;
-  padding: 10px 14px;
-  background: #d7a94d;
-  color: #183034;
-  font-weight: 800;
-  cursor: pointer;
-}
-button:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
 }
 .correction-box {
   display: grid;

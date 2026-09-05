@@ -1,6 +1,6 @@
 {
   "extends": "@tsconfig/node24/tsconfig.json",
-  "include": ["vite.config.*", "vitest.config.*", "playwright.config.*"],
+  "include": ["vite.config.*", "vitest.config.*", "vite.plugins.ts", "playwright.config.*"],
   "compilerOptions": {
     "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.node.tsbuildinfo",
     "module": "ESNext",

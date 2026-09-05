@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import SelectField from '@/components/form/SelectField.vue'
 import { computed, onUnmounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { shipmentApi } from '@/api/shipment'
@@ -304,17 +305,17 @@ onUnmounted(() => {
       <p>AFTER-SALES TRACE / 售后返工血缘</p>
       <h1>售后返工闭环</h1>
     </header>
-    <p v-if="error" role="alert" class="alert">{{ error }}</p>
-    <div v-if="flight" class="pending">
+    <el-alert v-if="error" :title="error" type="error" :closable="false" show-icon role="alert" />
+    <el-alert v-if="flight" type="warning" :closable="false" show-icon role="status">
       <span>{{
         flight.status === 'OUTCOME_UNKNOWN'
           ? '请求结果待确认，请保留原幂等请求'
           : '售后请求处理中，正在刷新权威状态'
       }}</span>
-      <button v-if="flight.status === 'OUTCOME_UNKNOWN'" type="button" @click="retryOutcomeUnknown">
+      <el-button v-if="flight.status === 'OUTCOME_UNKNOWN'" @click="retryOutcomeUnknown">
         用原请求重试确认
-      </button>
-    </div>
+      </el-button>
+    </el-alert>
     <section
       v-if="record"
       data-testid="immutable-lineage"
@@ -391,69 +392,90 @@ onUnmounted(() => {
     </ol>
     <section v-if="record && nextAction" class="action-card">
       <template v-if="nextAction.action === 'return-transit'">
-        <label>承运商<input v-model="carrier" maxlength="80" /></label>
-        <label>退货运单号<input v-model="trackingNo" maxlength="120" /></label>
+        <label>承运商<el-input v-model="carrier" maxlength="80" /></label>
+        <label>退货运单号<el-input v-model="trackingNo" maxlength="120" /></label>
       </template>
       <template v-if="nextAction.action === 'rework/start'">
         <label
-          >返工数量<input v-model="reworkQuantity" inputmode="decimal" placeholder="0.000000"
-        /></label>
-        <label>返工说明<textarea v-model="workNote" maxlength="500" /></label>
+          >返工数量
+          <el-input v-model="reworkQuantity" inputmode="decimal" placeholder="0.000000" />
+        </label>
+        <label>返工说明<el-input v-model="workNote" type="textarea" maxlength="500" /></label>
       </template>
       <template v-if="nextAction.action === 'inspect'">
         <label
-          >检验方法<select v-model="inspectionMethod">
-            <option value="FULL">全检</option>
-            <option value="SAMPLING">抽检</option>
-          </select></label
-        >
+          >检验方法
+          <SelectField
+            v-model="inspectionMethod"
+            aria-label="检验方法"
+            :options="[
+              { label: '全检', value: 'FULL' },
+              { label: '抽检', value: 'SAMPLING' },
+            ]"
+          />
+        </label>
         <label
-          >送检数量<input v-model="submittedQuantity" inputmode="decimal" placeholder="0.000000"
-        /></label>
+          >送检数量
+          <el-input v-model="submittedQuantity" inputmode="decimal" placeholder="0.000000" />
+        </label>
         <label
-          >合格数量<input v-model="passedQuantity" inputmode="decimal" placeholder="0.000000"
-        /></label>
+          >合格数量
+          <el-input v-model="passedQuantity" inputmode="decimal" placeholder="0.000000" />
+        </label>
         <label
-          >不合格数量<input v-model="failedQuantity" inputmode="decimal" placeholder="0.000000"
-        /></label>
-        <label>缺陷代码<input v-model="defectCode" maxlength="120" /></label>
-        <label>处置结论<textarea v-model="disposition" maxlength="500" /></label>
+          >不合格数量
+          <el-input v-model="failedQuantity" inputmode="decimal" placeholder="0.000000" />
+        </label>
+        <label>缺陷代码<el-input v-model="defectCode" maxlength="120" /></label>
+        <label>处置结论<el-input v-model="disposition" type="textarea" maxlength="500" /></label>
       </template>
       <label v-if="nextAction.action === 'pack'"
-        >新箱号<input v-model="boxNo" maxlength="80"
+        >新箱号<el-input v-model="boxNo" maxlength="80"
       /></label>
       <template v-if="nextAction.action === 'disposition/approve'">
         <label
-          >处置类型<select v-model="dispositionType">
-            <option value="SCRAP">报废</option>
-            <option value="DOWNGRADE">降级放行</option>
-            <option value="CONCESSION">让步接收</option>
-            <option value="OTHER_AUTHORIZED">其他授权</option>
-            <option value="REWORK_OVERRIDE">额外返工</option>
-          </select></label
-        >
+          >处置类型
+          <SelectField
+            v-model="dispositionType"
+            aria-label="处置类型"
+            :options="[
+              { label: '报废', value: 'SCRAP' },
+              { label: '降级放行', value: 'DOWNGRADE' },
+              { label: '让步接收', value: 'CONCESSION' },
+              { label: '其他授权', value: 'OTHER_AUTHORIZED' },
+              { label: '额外返工', value: 'REWORK_OVERRIDE' },
+            ]"
+          />
+        </label>
         <label
-          >数量结果<select v-model="dispositionOutcome">
-            <option value="DISPOSE">处置不返发</option>
-            <option value="RELEASE">批准放行</option>
-            <option value="REWORK">追加返工</option>
-          </select></label
-        >
-        <label>处置数量<input v-model="dispositionQuantity" inputmode="decimal" /></label>
+          >数量结果
+          <SelectField
+            v-model="dispositionOutcome"
+            aria-label="数量结果"
+            :options="[
+              { label: '处置不返发', value: 'DISPOSE' },
+              { label: '批准放行', value: 'RELEASE' },
+              { label: '追加返工', value: 'REWORK' },
+            ]"
+          />
+        </label>
+        <label>处置数量<el-input v-model="dispositionQuantity" inputmode="decimal" /></label>
         <label
-          >额外返工次数<input v-model.number="additionalAttempts" type="number" min="0" max="5"
-        /></label>
-        <label>审批原因<textarea v-model="decisionReason" maxlength="500" /></label>
-        <label>证据引用<input v-model="evidenceRef" maxlength="120" /></label>
+          >额外返工次数
+          <el-input v-model.number="additionalAttempts" type="number" min="0" max="5" />
+        </label>
+        <label>审批原因<el-input v-model="decisionReason" type="textarea" maxlength="500" /></label>
+        <label>证据引用<el-input v-model="evidenceRef" maxlength="120" /></label>
       </template>
-      <button
+      <el-button
         v-if="canAct"
         data-testid="after-sales-next-action"
+        type="primary"
         :disabled="!!flight"
         @click="transition"
       >
         {{ nextAction.label }}
-      </button>
+      </el-button>
       <p v-else class="permission-note">
         {{
           nextAction.action === 'disposition/approve' && !record.dispositionApprovalAllowed
@@ -566,18 +588,6 @@ h1 {
 .action-card label {
   display: grid;
   gap: 5px;
-}
-input,
-select,
-textarea,
-button {
-  min-height: 38px;
-  padding: 7px;
-  border: 1px solid #68726c;
-}
-button {
-  background: #173f32;
-  color: #fff;
 }
 .empty {
   text-align: center;

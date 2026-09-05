@@ -1,19 +1,16 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
+import { storeToRefs } from 'pinia'
 import { productionApi } from '@/api/production'
 import { createIdempotencyAttempt } from '@/api/http'
+import { WORK_ORDER_PAGE_SIZE, useWorkOrderListStore } from '@/stores/workOrders'
 import type { WorkOrderSummary } from '@/types/production'
 
-const rows = ref<WorkOrderSummary[]>([])
+const workOrders = useWorkOrderListStore()
+const { rows, loading, errorMessage, page, totalPages, totalElements } = storeToRefs(workOrders)
 const productionScheduleId = ref('')
-const loading = ref(false)
 const converting = ref(false)
-const errorMessage = ref('')
-const page = ref(0)
-const totalPages = ref(0)
-const totalElements = ref(0)
 const conversion = createIdempotencyAttempt()
-let loadSequence = 0
 
 const statusLabel: Record<WorkOrderSummary['status'], string> = {
   DRAFT: '草稿',
@@ -29,23 +26,8 @@ const statusLabel: Record<WorkOrderSummary['status'], string> = {
   CLOSED: '已关闭',
 }
 
-async function load(targetPage = page.value): Promise<void> {
-  const sequence = ++loadSequence
-  loading.value = true
-  errorMessage.value = ''
-  try {
-    const result = await productionApi.list(targetPage, 20)
-    if (sequence !== loadSequence) return
-    rows.value = result.content
-    page.value = result.page
-    totalPages.value = result.totalPages
-    totalElements.value = result.totalElements
-  } catch (error) {
-    if (sequence !== loadSequence) return
-    errorMessage.value = error instanceof Error ? error.message : '工单列表加载失败'
-  } finally {
-    if (sequence === loadSequence) loading.value = false
-  }
+function load(targetPage = page.value): Promise<void> {
+  return workOrders.load(targetPage)
 }
 
 async function convert(): Promise<void> {
@@ -68,7 +50,12 @@ async function convert(): Promise<void> {
   }
 }
 
+function asWorkOrder(row: unknown): WorkOrderSummary {
+  return row as WorkOrderSummary
+}
+
 onMounted(load)
+defineExpose({ load })
 </script>
 
 <template>
@@ -79,72 +66,105 @@ onMounted(load)
         <h1>生产工单</h1>
         <p>把已审批排程固化为唯一生产批次，沿产线追踪计划、在制与良品。</p>
       </div>
-      <button type="button" :disabled="loading" @click="load()">刷新工况</button>
+      <el-button :disabled="loading" @click="load()">刷新工况</el-button>
     </header>
 
-    <form data-testid="convert-form" class="convert-panel" @submit.prevent="convert">
-      <label>
-        <span>已审批排程 ID</span>
-        <input
+    <el-form data-testid="convert-form" class="convert-panel" inline @submit.prevent="convert">
+      <el-form-item label="已审批排程 ID">
+        <el-input
           v-model.trim="productionScheduleId"
           name="productionScheduleId"
-          required
           placeholder="ProductionSchedule UUID"
         />
-      </label>
-      <button type="submit" :disabled="converting">
-        {{ converting ? '转换中…' : '生成工单与批次' }}
-      </button>
+      </el-form-item>
+      <el-form-item>
+        <el-button type="primary" native-type="submit" :loading="converting">
+          {{ converting ? '转换中…' : '生成工单与批次' }}
+        </el-button>
+      </el-form-item>
       <small>同一排程无论重试或并发提交，都只生成一张工单与一个批次。</small>
-    </form>
+    </el-form>
 
-    <p v-if="errorMessage" class="error-note">{{ errorMessage }}</p>
+    <el-alert v-if="errorMessage" :title="errorMessage" type="error" :closable="false" show-icon />
 
-    <div class="table-shell">
-      <table>
-        <thead>
-          <tr>
-            <th>工单 / 状态</th>
-            <th>生产批次</th>
-            <th>产线</th>
-            <th>计划量</th>
-            <th>生产窗口</th>
-            <th>进度</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="row in rows" :key="row.id">
-            <td>
-              <RouterLink :to="`/work-orders/${row.id}`">{{ row.workOrderNo }}</RouterLink>
-              <span class="status" :data-status="row.status">{{ statusLabel[row.status] }}</span>
-            </td>
-            <td>
-              <code>{{ row.productionBatch.plannedBatchCode }}</code>
-            </td>
-            <td>
-              <code>{{ row.productionLineId }}</code>
-            </td>
-            <td class="quantity">{{ row.plannedQuantity }}</td>
-            <td>{{ row.productionBatch.startDate }} → {{ row.productionBatch.endDate }}</td>
-            <td>
-              <b>{{ row.totalGoodQuantity }}</b>
-              <small>良品 / 在制 {{ row.workInProgressQuantity }}</small>
-            </td>
-          </tr>
-          <tr v-if="!loading && rows.length === 0">
-            <td colspan="6" class="empty">暂无工单，从已审批排程开始。</td>
-          </tr>
-        </tbody>
-      </table>
+    <div class="desktop-record-table">
+      <el-table v-loading="loading" :data="rows">
+        <el-table-column label="工单 / 状态" min-width="180">
+          <template #default="{ row }">
+            <RouterLink :to="`/work-orders/${asWorkOrder(row).id}`">{{
+              asWorkOrder(row).workOrderNo
+            }}</RouterLink>
+            <el-tag size="small">{{ statusLabel[asWorkOrder(row).status] }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="生产批次" min-width="140">
+          <template #default="{ row }">
+            <code>{{ row.productionBatch.plannedBatchCode }}</code>
+          </template>
+        </el-table-column>
+        <el-table-column label="产线" min-width="120">
+          <template #default="{ row }">
+            <code>{{ row.productionLineId }}</code>
+          </template>
+        </el-table-column>
+        <el-table-column label="计划量" prop="plannedQuantity" width="100" />
+        <el-table-column label="生产窗口" min-width="200">
+          <template #default="{ row }">
+            {{ row.productionBatch.startDate }} → {{ row.productionBatch.endDate }}
+          </template>
+        </el-table-column>
+        <el-table-column label="进度" min-width="140">
+          <template #default="{ row }">
+            <b>{{ row.totalGoodQuantity }}</b>
+            <small>良品 / 在制 {{ row.workInProgressQuantity }}</small>
+          </template>
+        </el-table-column>
+        <template #empty>暂无工单，从已审批排程开始。</template>
+      </el-table>
+    </div>
+    <div v-if="rows.length" class="mobile-record-list" :aria-busy="loading">
+      <article v-for="row in rows" :key="row.id" class="mobile-record-card">
+        <header>
+          <div>
+            <code>{{ row.workOrderNo }}</code
+            ><small>{{ row.productionLineId }}</small>
+          </div>
+          <el-tag size="small">{{ statusLabel[row.status] }}</el-tag>
+        </header>
+        <dl>
+          <div>
+            <dt>生产批次</dt>
+            <dd>{{ row.productionBatch.plannedBatchCode }}</dd>
+          </div>
+          <div>
+            <dt>计划量</dt>
+            <dd>{{ row.plannedQuantity }}</dd>
+          </div>
+          <div>
+            <dt>生产窗口</dt>
+            <dd>{{ row.productionBatch.startDate }} → {{ row.productionBatch.endDate }}</dd>
+          </div>
+          <div>
+            <dt>良品 / 在制</dt>
+            <dd>{{ row.totalGoodQuantity }} / {{ row.workInProgressQuantity }}</dd>
+          </div>
+        </dl>
+        <footer>
+          <RouterLink class="record-primary-link" :to="`/work-orders/${row.id}`"
+            >查看工单</RouterLink
+          >
+        </footer>
+      </article>
     </div>
     <nav v-if="totalPages > 1" class="pager" aria-label="工单分页">
-      <button type="button" :disabled="loading || page === 0" @click="load(page - 1)">
-        上一页
-      </button>
       <span>第 {{ page + 1 }} / {{ totalPages }} 页，共 {{ totalElements }} 张工单</span>
-      <button type="button" :disabled="loading || page + 1 >= totalPages" @click="load(page + 1)">
-        下一页
-      </button>
+      <el-pagination
+        :current-page="page + 1"
+        :page-size="WORK_ORDER_PAGE_SIZE"
+        :total="totalElements"
+        layout="prev, pager, next"
+        @current-change="(next: number) => load(next - 1)"
+      />
     </nav>
   </section>
 </template>

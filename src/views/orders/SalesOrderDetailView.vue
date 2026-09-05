@@ -312,53 +312,54 @@ onUnmounted(() => {
         >
           包装与发运
         </RouterLink>
-        <button
+        <el-button
           v-if="canManage && order.status === 'DRAFT'"
           data-testid="submit-order"
-          class="outline-action"
-          type="button"
           :disabled="!!pendingAction"
           @click="act('submit')"
         >
           提交审核
-        </button>
-        <button
+        </el-button>
+        <el-button
           v-if="canApprove && order.status === 'PENDING_APPROVAL'"
           data-testid="approve-order"
-          class="primary-action compact"
-          type="button"
+          type="primary"
           :disabled="!!pendingAction"
           @click="act('approve')"
         >
-          <span>审核并冻结BOM</span><b>✓</b>
-        </button>
-        <button
+          审核并冻结BOM
+        </el-button>
+        <el-button
           v-if="canCancel"
           data-testid="cancel-order"
-          class="outline-action danger-action"
-          type="button"
           :disabled="!!pendingAction"
           @click="act('cancel')"
         >
           取消订单
-        </button>
-        <button
+        </el-button>
+        <el-button
           v-if="canApprove && order.status === 'AFTER_SALES_OBSERVATION'"
           data-testid="close-order"
-          class="primary-action compact"
-          type="button"
+          type="primary"
           :disabled="!!pendingAction"
           @click="act('close')"
         >
-          <span>关闭订单</span><b>✓</b>
-        </button>
+          关闭订单
+        </el-button>
       </div>
     </header>
 
-    <div v-if="failure" class="master-error" role="alert" aria-live="polite">
-      <b>{{ failure }}</b
-      ><span v-if="traceId">追踪号 {{ traceId }}</span>
-    </div>
+    <el-alert
+      v-if="failure"
+      :title="failure"
+      type="error"
+      :closable="false"
+      show-icon
+      role="alert"
+      aria-live="polite"
+    >
+      <span v-if="traceId">追踪号 {{ traceId }}</span>
+    </el-alert>
 
     <OrderTimeline :status="order.status" :progress="order.progress" />
 
@@ -391,6 +392,7 @@ onUnmounted(() => {
           <span>人工确认送达时间</span>
           <input
             v-model="confirmedDeliveredAt"
+            class="native-control"
             data-testid="manual-delivery-time"
             type="datetime-local"
             :disabled="manualDeliveryPending"
@@ -398,25 +400,24 @@ onUnmounted(() => {
         </label>
         <label class="manual-delivery-reason">
           <span>授权原因</span>
-          <textarea
+          <el-input
             v-model="manualDeliveryReason"
+            type="textarea"
             data-testid="manual-delivery-reason"
             maxlength="500"
-            rows="3"
+            :rows="3"
             :disabled="manualDeliveryPending"
           />
         </label>
       </div>
-      <button
-        class="primary-action compact"
+      <el-button
+        type="primary"
         data-testid="confirm-manual-delivery"
-        type="button"
         :disabled="manualDeliveryPending || !manualDeliveryFile"
         @click="confirmManualDelivery"
       >
-        <span>{{ manualDeliveryPending ? '正在冻结凭证并确认…' : '冻结凭证并确认送达' }}</span
-        ><b>✓</b>
-      </button>
+        {{ manualDeliveryPending ? '正在冻结凭证并确认…' : '冻结凭证并确认送达' }}
+      </el-button>
     </article>
 
     <div class="order-detail-grid">
@@ -429,37 +430,35 @@ onUnmounted(() => {
           <span>{{ order.items.reduce((sum, item) => sum + item.quantity, 0) }} 件</span>
         </header>
         <div class="responsive-table">
-          <table class="order-data-table">
-            <thead>
-              <tr>
-                <th>颜色 / 尺码 / 版型</th>
-                <th>数量</th>
-                <th>生产完成</th>
-                <th>交期</th>
-                <th>单价</th>
-                <th>特殊工艺</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="item in order.items" :key="item.id">
-                <td>{{ item.color }} / {{ item.size }} / {{ item.fit }}</td>
-                <td>{{ item.quantity }}</td>
-                <td>
-                  {{ item.productionCompletedQuantity }} / {{ item.quantity }} ·
-                  {{
-                    item.productionStatus === 'READY'
-                      ? '已齐套完成'
-                      : item.productionStatus === 'PARTIAL'
-                        ? '部分完成'
-                        : '待生产'
-                  }}
-                </td>
-                <td>{{ item.deliveryDate }}</td>
-                <td>{{ item.unitPrice == null ? '—' : '¥' + item.unitPrice.toFixed(2) }}</td>
-                <td>{{ item.specialProcess || '—' }}</td>
-              </tr>
-            </tbody>
-          </table>
+          <el-table class="order-data-table" :data="order.items">
+            <el-table-column label="颜色 / 尺码 / 版型" min-width="180">
+              <template #default="{ row }"
+                >{{ row.color }} / {{ row.size }} / {{ row.fit }}</template
+              >
+            </el-table-column>
+            <el-table-column prop="quantity" label="数量" min-width="80" />
+            <el-table-column label="生产完成" min-width="200">
+              <template #default="{ row }">
+                {{ row.productionCompletedQuantity }} / {{ row.quantity }} ·
+                {{
+                  row.productionStatus === 'READY'
+                    ? '已齐套完成'
+                    : row.productionStatus === 'PARTIAL'
+                      ? '部分完成'
+                      : '待生产'
+                }}
+              </template>
+            </el-table-column>
+            <el-table-column prop="deliveryDate" label="交期" min-width="120" />
+            <el-table-column label="单价" min-width="100">
+              <template #default="{ row }">
+                {{ row.unitPrice == null ? '—' : '¥' + row.unitPrice.toFixed(2) }}
+              </template>
+            </el-table-column>
+            <el-table-column label="特殊工艺" min-width="120">
+              <template #default="{ row }">{{ row.specialProcess || '—' }}</template>
+            </el-table-column>
+          </el-table>
         </div>
       </article>
 
@@ -549,10 +548,9 @@ onUnmounted(() => {
   </section>
   <section v-else class="pattern-panel" :aria-busy="loading">
     <p v-if="!failure">正在装载订单履约档案…</p>
-    <div v-else class="master-error" role="alert">
-      <b>{{ failure }}</b
-      ><span v-if="traceId">追踪号 {{ traceId }}</span>
-    </div>
+    <el-alert v-else :title="failure" type="error" :closable="false" show-icon role="alert">
+      <span v-if="traceId">追踪号 {{ traceId }}</span>
+    </el-alert>
   </section>
 </template>
 

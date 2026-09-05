@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import SelectField from '@/components/form/SelectField.vue'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { shipmentApi } from '@/api/shipment'
 import { createIdempotencyAttempt } from '@/api/http'
@@ -234,21 +235,20 @@ onUnmounted(() => {
         <h1>全租户售后待办</h1>
         <p>客户反馈、退货、返工、复检、重装与补发均以后台事实为准。</p>
       </div>
-      <button type="button" :disabled="loading" @click="load()">权威刷新</button>
+      <el-button type="primary" :disabled="loading" @click="load()">权威刷新</el-button>
     </header>
 
-    <p v-if="error" class="alert" role="alert">{{ error }}</p>
-    <div v-if="flight" class="sync-alert" role="status">
+    <el-alert v-if="error" :title="error" type="error" :closable="false" show-icon role="alert" />
+    <el-alert v-if="flight" type="warning" :closable="false" show-icon role="status">
       <span>有一笔写操作正在确认，请勿重复提交。</span>
-      <button
+      <el-button
         v-if="flight.status === 'OUTCOME_UNKNOWN'"
-        type="button"
         data-testid="after-sales-retry"
         @click="retry"
       >
         使用原幂等键重试
-      </button>
-    </div>
+      </el-button>
+    </el-alert>
 
     <section class="panel">
       <div class="section-title">
@@ -272,22 +272,20 @@ onUnmounted(() => {
       </div>
       <p v-else class="empty">当前页没有售后任务。</p>
       <nav class="pager" aria-label="售后任务分页">
-        <button
-          type="button"
+        <el-button
           :disabled="!afterSalesPage?.hasPrevious || loading"
           @click="changePage(page - 1)"
         >
           上一页
-        </button>
+        </el-button>
         <span>第 {{ page + 1 }} 页</span>
-        <button
-          type="button"
+        <el-button
           data-testid="after-sales-next-page"
           :disabled="!afterSalesPage?.hasNext || loading"
           @click="changePage(page + 1)"
         >
           下一页
-        </button>
+        </el-button>
       </nav>
     </section>
 
@@ -304,35 +302,42 @@ onUnmounted(() => {
         @submit.prevent="openException"
       >
         <label
-          >订单 ID<input v-model.trim="orderId" data-testid="exception-order-id" maxlength="36"
+          >订单 ID<el-input v-model.trim="orderId" data-testid="exception-order-id" maxlength="36"
         /></label>
         <label
           >异常类别
-          <select v-model="category">
-            <option value="ORDER_CHANGE">订单变更</option>
-            <option value="REPLENISHMENT">补货</option>
-            <option value="CUSTOMER_EXCHANGE">客户退换</option>
-            <option value="CUSTOMER_CLAIM">客户索赔</option>
-            <option value="INVENTORY_ANOMALY">库存异常</option>
-          </select>
+          <SelectField
+            v-model="category"
+            aria-label="异常类别"
+            :options="[
+              { label: '订单变更', value: 'ORDER_CHANGE' },
+              { label: '补货', value: 'REPLENISHMENT' },
+              { label: '客户退换', value: 'CUSTOMER_EXCHANGE' },
+              { label: '客户索赔', value: 'CUSTOMER_CLAIM' },
+              { label: '库存异常', value: 'INVENTORY_ANOMALY' },
+            ]"
+          />
         </label>
         <label
-          >业务编号<input v-model="referenceNo" data-testid="exception-reference" maxlength="80"
+          >业务编号<el-input v-model="referenceNo" data-testid="exception-reference" maxlength="80"
         /></label>
         <label
-          >影响数量<input
+          >影响数量<el-input
             v-model="affectedQuantity"
             data-testid="exception-quantity"
             inputmode="decimal"
         /></label>
         <label class="wide"
-          >异常说明<textarea
+          >异常说明<el-input
             v-model="description"
+            type="textarea"
             data-testid="exception-description"
             maxlength="500"
           />
         </label>
-        <button :disabled="!!flight || !canManage">登记异常</button>
+        <el-button type="primary" native-type="submit" :disabled="!!flight || !canManage"
+          >登记异常</el-button
+        >
       </form>
       <div v-if="exceptionPage?.items.length" class="exception-list">
         <article v-for="item in exceptionPage.items" :key="item.id">
@@ -343,40 +348,38 @@ onUnmounted(() => {
           </div>
           <label
             >解决证据编号
-            <input
+            <el-input
               v-model="evidenceRefs[item.id]"
               :data-testid="`evidence-${item.id}`"
               maxlength="120"
             />
           </label>
-          <button
-            type="button"
+          <el-button
+            type="primary"
             :data-testid="`resolve-${item.id}`"
             :disabled="!!flight || !canManage"
             @click="resolveException(item)"
           >
             校验证据并解决
-          </button>
+          </el-button>
         </article>
       </div>
       <p v-else class="empty">没有开放的订单异常。</p>
       <nav class="pager" aria-label="订单异常分页">
-        <button
-          type="button"
+        <el-button
           :disabled="!exceptionPage?.hasPrevious || loading"
           @click="changeExceptionPage(exceptionPageNumber - 1)"
         >
           上一页
-        </button>
+        </el-button>
         <span>第 {{ exceptionPageNumber + 1 }} 页 / 共 {{ exceptionPage?.total ?? 0 }} 条</span>
-        <button
-          type="button"
+        <el-button
           data-testid="exception-next-page"
           :disabled="!exceptionPage?.hasNext || loading"
           @click="changeExceptionPage(exceptionPageNumber + 1)"
         >
           下一页
-        </button>
+        </el-button>
       </nav>
     </section>
   </main>
@@ -446,28 +449,6 @@ label {
 }
 .wide {
   grid-column: 1 / -1;
-}
-input,
-select,
-textarea,
-button {
-  min-height: 38px;
-  border: 1px solid #777;
-  background: #fff;
-  padding: 7px;
-}
-textarea {
-  min-height: 72px;
-  resize: vertical;
-}
-button {
-  background: #17202a;
-  color: #fff;
-  cursor: pointer;
-}
-button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
 }
 .exception-list {
   display: grid;

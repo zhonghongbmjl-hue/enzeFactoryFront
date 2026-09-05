@@ -220,27 +220,30 @@ onMounted(load)
         <span>产线 {{ workOrder.productionLineId }}</span>
       </div>
       <div class="actions">
-        <button
+        <el-button
           v-if="workOrder.status === 'DRAFT'"
+          type="primary"
           :disabled="actionPending.submit"
           @click="transition('submit')"
         >
           提交审批
-        </button>
-        <button
+        </el-button>
+        <el-button
           v-if="workOrder.status === 'PENDING_APPROVAL'"
+          type="primary"
           :disabled="actionPending.approve"
           @click="transition('approve')"
         >
           审批工单
-        </button>
-        <button
+        </el-button>
+        <el-button
           v-if="workOrder.status === 'APPROVED'"
+          type="primary"
           :disabled="actionPending.release"
           @click="transition('release')"
         >
           下达产线
-        </button>
+        </el-button>
       </div>
     </header>
 
@@ -286,7 +289,7 @@ onMounted(load)
     </div>
 
     <div class="workspace">
-      <form
+      <el-form
         v-if="['RELEASED', 'IN_PRODUCTION'].includes(workOrder.status)"
         data-testid="report-form"
         @submit.prevent="report"
@@ -300,38 +303,46 @@ onMounted(load)
         </header>
         <div class="form-grid">
           <label
-            >新投入<input v-model="reportForm.inputQuantity" name="inputQuantity" required
+            >新投入<el-input v-model="reportForm.inputQuantity" name="inputQuantity" required
           /></label>
           <label
-            >本次良品<input v-model="reportForm.goodQuantity" name="goodQuantity" required
+            >本次良品<el-input v-model="reportForm.goodQuantity" name="goodQuantity" required
           /></label>
           <label
-            >本次不良<input v-model="reportForm.defectQuantity" name="defectQuantity" required
+            >本次不良<el-input v-model="reportForm.defectQuantity" name="defectQuantity" required
           /></label>
           <label
-            >返工投入<input
+            >返工投入
+            <el-input
               v-model="reportForm.reworkInputQuantity"
               name="reworkInputQuantity"
               required
-          /></label>
+            />
+          </label>
           <label
-            >期末在制<input
+            >期末在制
+            <el-input
               v-model="reportForm.closingWorkInProgressQuantity"
               name="closingWorkInProgressQuantity"
               required
-          /></label>
+            />
+          </label>
           <label
-            >操作人员<input v-model.trim="reportForm.operator" name="operator" required
+            >操作人员<el-input v-model.trim="reportForm.operator" name="operator" required
           /></label>
-          <label>班组<input v-model.trim="reportForm.team" name="team" required /></label>
-          <label>工时<input v-model="reportForm.workHours" name="workHours" required /></label>
-          <label>设备<input v-model.trim="reportForm.equipment" name="equipment" required /></label>
+          <label>班组<el-input v-model.trim="reportForm.team" name="team" required /></label>
+          <label>工时<el-input v-model="reportForm.workHours" name="workHours" required /></label>
+          <label
+            >设备<el-input v-model.trim="reportForm.equipment" name="equipment" required
+          /></label>
         </div>
         <p class="formula">
           期初在制 + 新投入 + 返工投入 = 本次良品 + 本次不良 + 期末在制；本次不良全部进入待返工。
         </p>
-        <button type="submit" :disabled="reportPending">提交报工</button>
-      </form>
+        <el-button type="primary" native-type="submit" :disabled="reportPending"
+          >提交报工</el-button
+        >
+      </el-form>
 
       <section class="reports">
         <h2>不可变报工流水</h2>
@@ -347,20 +358,19 @@ onMounted(load)
         </article>
         <p v-if="reports.length === 0">尚无报工记录。</p>
         <nav v-if="reportTotalPages > 1" class="report-pager" aria-label="报工流水分页">
-          <button type="button" :disabled="reportPage === 0" @click="loadReports(reportPage - 1)">
+          <el-button :disabled="reportPage === 0" @click="loadReports(reportPage - 1)">
             上一页
-          </button>
+          </el-button>
           <span
             >第 {{ reportPage + 1 }} / {{ reportTotalPages }} 页，共
             {{ reportTotalElements }} 条</span
           >
-          <button
-            type="button"
+          <el-button
             :disabled="reportPage + 1 >= reportTotalPages"
             @click="loadReports(reportPage + 1)"
           >
             下一页
-          </button>
+          </el-button>
         </nav>
       </section>
     </div>
@@ -370,10 +380,24 @@ onMounted(load)
       @inspection-updated="completionGate?.refresh()"
     />
     <CompletionGateStatus ref="completionGate" :work-order="workOrder" @completed="load" />
-    <p v-if="errorMessage" class="error-note">{{ errorMessage }}</p>
+    <el-alert
+      v-if="errorMessage"
+      :title="errorMessage"
+      type="error"
+      :closable="false"
+      show-icon
+      role="alert"
+    />
   </section>
   <p v-else-if="loading">工单读取中…</p>
-  <p v-else class="error-note">{{ errorMessage || '未找到工单' }}</p>
+  <el-alert
+    v-else
+    :title="errorMessage || '未找到工单'"
+    type="error"
+    :closable="false"
+    show-icon
+    role="alert"
+  />
 </template>
 
 <style scoped>
@@ -495,12 +519,6 @@ label {
   gap: 5px;
   font-size: 12px;
   font-weight: 750;
-}
-input {
-  min-width: 0;
-  padding: 10px;
-  border: 1px solid #aebeba;
-  border-radius: 7px;
 }
 .formula {
   margin-bottom: 14px;

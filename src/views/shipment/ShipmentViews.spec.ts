@@ -36,6 +36,14 @@ const PACKING_ITEM_1 = '99999999-9999-4999-8999-999999999999'
 const BOX_2 = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
 const PACKING_ITEM_2 = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
 
+function selectField(wrapper: ReturnType<typeof mount>, testId: string) {
+  const field = wrapper
+    .findAllComponents({ name: 'SelectField' })
+    .find((item) => item.props('dataTestid') === testId)
+  if (!field) throw new Error(`SelectField [data-testid="${testId}"] not found`)
+  return field
+}
+
 const workspace: ShipmentOrderWorkspace = {
   salesOrderId: ORDER,
   qualityPassedQuantity: '10.000000',
@@ -266,9 +274,15 @@ describe('包装发运与售后返工工作台', () => {
   it('从多个包装箱选择每条包装明细并创建完整发运计划', async () => {
     permissions(['SHIPMENT_VIEW', 'SHIPMENT_MANAGE'])
     const wrapper = await renderShipment()
-    await wrapper.get(`[data-testid="shipment-select-${PACKING_ITEM_1}"]`).setValue(true)
+    await wrapper
+      .get(`[data-testid="shipment-select-${PACKING_ITEM_1}"]`)
+      .get('input[type="checkbox"]')
+      .setValue(true)
     await wrapper.get(`[data-testid="shipment-quantity-${PACKING_ITEM_1}"]`).setValue('4.000000')
-    await wrapper.get(`[data-testid="shipment-select-${PACKING_ITEM_2}"]`).setValue(true)
+    await wrapper
+      .get(`[data-testid="shipment-select-${PACKING_ITEM_2}"]`)
+      .get('input[type="checkbox"]')
+      .setValue(true)
     await wrapper.get(`[data-testid="shipment-quantity-${PACKING_ITEM_2}"]`).setValue('2.000000')
     await wrapper.get('[data-testid="create-shipment-form"]').trigger('submit')
     expect(shipmentApi.createShipment).toHaveBeenCalledWith(
@@ -317,7 +331,7 @@ describe('包装发运与售后返工工作台', () => {
       shipments: [{ ...structuredClone(workspace.shipments[0]!), status: 'SIGNED' }],
     })
     const wrapper = await renderShipment()
-    await wrapper.get('[data-testid="after-sales-source"]').setValue(SHIPMENT_LINE)
+    await selectField(wrapper, 'after-sales-source').setValue(SHIPMENT_LINE)
     await wrapper.get('[data-testid="after-sales-quantity"]').setValue('1.000000')
     await wrapper.get('[data-testid="after-sales-reason"]').setValue('seam_open')
     await wrapper.get('[data-testid="after-sales-feedback"]').setValue('客户反馈开线')

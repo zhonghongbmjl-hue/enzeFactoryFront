@@ -111,10 +111,17 @@ onMounted(load)
       </RouterLink>
     </header>
 
-    <div v-if="failure" class="master-error" role="alert" aria-live="polite">
-      <b>{{ failure }}</b
-      ><span v-if="traceId">追踪号 {{ traceId }}</span>
-    </div>
+    <el-alert
+      v-if="failure"
+      :title="failure"
+      type="error"
+      :closable="false"
+      show-icon
+      role="alert"
+      aria-live="polite"
+    >
+      <span v-if="traceId">追踪号 {{ traceId }}</span>
+    </el-alert>
 
     <div v-if="workspace" class="procurement-branches">
       <article
@@ -147,81 +154,74 @@ onMounted(load)
         </ol>
 
         <div class="responsive-table branch-table">
-          <table class="order-data-table">
-            <thead>
-              <tr>
-                <th>物料</th>
-                <th>采购数量</th>
-                <th>执行数量</th>
-                <th>来源关系</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="item in plan.items" :key="item.id">
-                <td>
-                  <code>{{ item.materialCode }}</code
-                  ><small>{{ item.materialName }}</small>
-                </td>
-                <td>
-                  <b>{{ item.plannedQuantity }} {{ item.uom }}</b>
-                </td>
-                <td>
-                  <span class="item-quantity-progress">
-                    <small>下单 {{ item.orderedQuantity }}</small>
-                    <small>到货 {{ item.receivedQuantity }}</small>
-                    <small>检验 {{ item.inspectedQuantity }}</small>
-                    <small>合格 {{ item.passedQuantity }}</small>
-                    <small v-if="item.rejectedQuantity">不合格 {{ item.rejectedQuantity }}</small>
-                    <small>上架 {{ item.putAwayQuantity }}</small>
-                  </span>
-                </td>
-                <td>
-                  <span class="source-chain">
-                    <small
-                      >订单项 <code>{{ item.orderItemId.slice(0, 8) }}</code></small
-                    >
-                    <small
-                      >冻结BOM <code>{{ item.bomSnapshotId.slice(0, 8) }}</code></small
-                    >
-                  </span>
-                </td>
-              </tr>
-            </tbody>
-          </table>
+          <el-table class="order-data-table" :data="plan.items">
+            <el-table-column label="物料" min-width="180">
+              <template #default="{ row }">
+                <code>{{ row.materialCode }}</code>
+                <small>{{ row.materialName }}</small>
+              </template>
+            </el-table-column>
+            <el-table-column label="采购数量" min-width="120">
+              <template #default="{ row }">
+                <b>{{ row.plannedQuantity }} {{ row.uom }}</b>
+              </template>
+            </el-table-column>
+            <el-table-column label="执行数量" min-width="220">
+              <template #default="{ row }">
+                <span class="item-quantity-progress">
+                  <small>下单 {{ row.orderedQuantity }}</small>
+                  <small>到货 {{ row.receivedQuantity }}</small>
+                  <small>检验 {{ row.inspectedQuantity }}</small>
+                  <small>合格 {{ row.passedQuantity }}</small>
+                  <small v-if="row.rejectedQuantity">不合格 {{ row.rejectedQuantity }}</small>
+                  <small>上架 {{ row.putAwayQuantity }}</small>
+                </span>
+              </template>
+            </el-table-column>
+            <el-table-column label="来源关系" min-width="180">
+              <template #default="{ row }">
+                <span class="source-chain">
+                  <small
+                    >订单项 <code>{{ row.orderItemId.slice(0, 8) }}</code></small
+                  >
+                  <small
+                    >冻结BOM <code>{{ row.bomSnapshotId.slice(0, 8) }}</code></small
+                  >
+                </span>
+              </template>
+            </el-table-column>
+          </el-table>
         </div>
 
         <footer class="branch-actions">
           <span>版本 {{ plan.version }} · {{ plan.items.length }} 项</span>
-          <button
+          <el-button
             v-if="canManage && plan.status === 'DRAFT'"
             :data-testid="`submit-${plan.materialType.toLowerCase()}-plan`"
-            class="primary-action compact"
-            type="button"
+            type="primary"
             :disabled="!!pending"
             @click="act(plan, 'submit')"
           >
-            <span>提交采购计划</span><b>→</b>
-          </button>
-          <button
+            提交采购计划
+          </el-button>
+          <el-button
             v-if="canApprove && plan.status === 'PENDING_APPROVAL'"
             :data-testid="`approve-${plan.materialType.toLowerCase()}-plan`"
-            class="primary-action compact"
-            type="button"
+            type="primary"
             :disabled="!!pending"
             @click="act(plan, 'approve')"
           >
-            <span>审核采购计划</span><b>✓</b>
-          </button>
-          <button
+            审核采购计划
+          </el-button>
+          <el-button
             v-if="canManage && plan.status === 'ORDERED'"
             :data-testid="`complete-${plan.materialType.toLowerCase()}-plan`"
-            class="primary-action compact"
-            type="button"
+            type="primary"
             :disabled="!!pending"
             @click="act(plan, 'complete')"
           >
-            <span>完成采购计划</span><b>✓</b>
-          </button>
+            完成采购计划
+          </el-button>
         </footer>
       </article>
     </div>

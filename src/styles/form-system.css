@@ -1,0 +1,366 @@
+:root {
+  --field-height: 40px;
+  --field-radius: 4px;
+  --field-gap: 16px;
+  --field-label-gap: 6px;
+  --field-border: var(--fabric-300);
+  --field-border-hover: #829397;
+  --field-background: #fff;
+  --field-background-disabled: var(--fabric-100);
+  --field-placeholder: var(--text-note-on-fabric);
+  --field-focus-ring: rgba(237, 108, 44, 0.2);
+}
+
+.el-form-item {
+  min-width: 0;
+  margin-bottom: var(--field-gap);
+}
+
+.el-form-item__label {
+  height: auto !important;
+  padding: 0 !important;
+  margin-bottom: var(--field-label-gap) !important;
+  color: var(--text-label-on-fabric) !important;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.35 !important;
+}
+
+.el-input,
+.el-select,
+.el-input-number,
+.el-date-editor,
+.el-textarea {
+  width: 100%;
+  min-width: 0;
+}
+
+.el-input__wrapper,
+.el-select__wrapper,
+.el-input-number .el-input__wrapper,
+.el-date-editor.el-input__wrapper {
+  min-height: var(--field-height) !important;
+  padding: 0 12px !important;
+  background: var(--field-background) !important;
+  border: 0 !important;
+  border-radius: var(--field-radius) !important;
+  box-shadow: 0 0 0 1px var(--field-border) inset !important;
+  transition:
+    box-shadow var(--motion-fast),
+    background-color var(--motion-fast) !important;
+}
+
+.el-input__wrapper:hover,
+.el-select__wrapper:hover,
+.el-input-number .el-input__wrapper:hover,
+.el-date-editor.el-input__wrapper:hover {
+  box-shadow: 0 0 0 1px var(--field-border-hover) inset !important;
+}
+
+.el-input__wrapper.is-focus,
+.el-select__wrapper.is-focused,
+.el-select__wrapper.is-focus,
+.el-input-number .el-input__wrapper.is-focus,
+.el-date-editor.el-input__wrapper.is-focus {
+  box-shadow:
+    0 0 0 1px var(--orange-500) inset,
+    0 0 0 3px var(--field-focus-ring) !important;
+}
+
+/* Reset legacy page selectors that accidentally style Element Plus' inner native control. */
+.el-input__inner,
+.el-select__input,
+.el-input-number .el-input__inner,
+.el-date-editor .el-input__inner {
+  width: 100% !important;
+  min-width: 0 !important;
+  height: auto !important;
+  min-height: 0 !important;
+  padding: 0 !important;
+  color: var(--ink-900) !important;
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  outline: 0 !important;
+  font: inherit !important;
+}
+
+.el-input__inner::placeholder,
+.el-select__placeholder,
+.el-textarea__inner::placeholder {
+  color: var(--field-placeholder) !important;
+  opacity: 0.8;
+}
+
+.el-textarea__inner {
+  min-height: 96px !important;
+  padding: 10px 12px !important;
+  color: var(--ink-900) !important;
+  background: var(--field-background) !important;
+  border: 0 !important;
+  border-radius: var(--field-radius) !important;
+  box-shadow: 0 0 0 1px var(--field-border) inset !important;
+  resize: vertical;
+  transition: box-shadow var(--motion-fast) !important;
+}
+
+.el-textarea__inner:hover {
+  box-shadow: 0 0 0 1px var(--field-border-hover) inset !important;
+}
+
+.el-textarea__inner:focus {
+  box-shadow:
+    0 0 0 1px var(--orange-500) inset,
+    0 0 0 3px var(--field-focus-ring) !important;
+  outline: 0 !important;
+}
+
+.el-input.is-disabled .el-input__wrapper,
+.el-select.is-disabled .el-select__wrapper,
+.el-textarea.is-disabled .el-textarea__inner,
+.el-input__wrapper.is-disabled,
+.el-select__wrapper.is-disabled {
+  color: var(--text-muted-on-fabric) !important;
+  background: var(--field-background-disabled) !important;
+  box-shadow: 0 0 0 1px var(--line) inset !important;
+  cursor: not-allowed;
+  opacity: 0.72;
+}
+
+.el-form-item.is-error .el-input__wrapper,
+.el-form-item.is-error .el-select__wrapper,
+.el-form-item.is-error .el-textarea__inner {
+  box-shadow: 0 0 0 1px var(--el-color-danger) inset !important;
+}
+
+.el-form-item__error {
+  position: static !important;
+  padding-top: 5px !important;
+  line-height: 1.4;
+}
+
+.el-radio-group,
+.el-checkbox-group {
+  min-width: 0;
+}
+
+.el-radio-button__inner {
+  min-height: var(--field-height);
+  padding: 0 16px;
+  line-height: var(--field-height);
+}
+
+.el-checkbox {
+  min-height: var(--field-height);
+  margin-right: 0;
+}
+
+.el-checkbox__label {
+  white-space: normal;
+}
+
+.native-control {
+  width: 100% !important;
+  min-width: 0 !important;
+  min-height: var(--field-height) !important;
+  padding: 0 12px !important;
+  color: var(--ink-900) !important;
+  background: var(--field-background) !important;
+  border: 1px solid var(--field-border) !important;
+  border-radius: var(--field-radius) !important;
+  box-shadow: none !important;
+  font: inherit !important;
+}
+
+.native-control:hover {
+  border-color: var(--field-border-hover) !important;
+}
+
+.native-control:focus-visible {
+  border-color: var(--orange-500) !important;
+  outline: 3px solid var(--field-focus-ring) !important;
+  outline-offset: 0 !important;
+}
+
+.filter-bar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--field-gap);
+  align-items: end;
+  padding: 16px;
+  background: var(--fabric-100);
+  border-left: 4px solid var(--orange-500);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-1);
+}
+
+.filter-fields {
+  display: grid;
+  grid-template-columns: minmax(280px, 360px) minmax(160px, max-content);
+  gap: var(--field-gap);
+  align-items: end;
+  min-width: 0;
+}
+
+.filter-bar .el-form-item {
+  margin-bottom: 0;
+}
+
+.filter-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  min-height: var(--field-height);
+}
+
+.filter-actions .el-button {
+  min-width: 76px;
+}
+
+.master-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: var(--field-gap);
+  align-items: start;
+}
+
+.master-form > .el-button,
+.master-form > .form-actions,
+.master-form .field-wide,
+.master-form .el-form-item:has(.el-textarea) {
+  grid-column: 1 / -1;
+}
+
+.master-form > .el-button {
+  min-width: 128px;
+  justify-self: end;
+}
+
+.master-form .el-space {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  width: 100%;
+}
+
+.master-form .el-space__item {
+  min-width: 0;
+}
+
+.field-grid,
+.form-grid,
+.compact-fields,
+.inspection-form,
+.quantity-row {
+  gap: var(--field-gap) !important;
+}
+
+.field-grid > label,
+.form-grid > label,
+.compact-fields > label,
+.inspection-form > label,
+.movement-card label,
+.action-card label,
+.forms label,
+.query-strip > label,
+.planning-form label,
+.plan-query > label,
+.mutation-form label,
+.bundle-entry label,
+.schedule-form label,
+.exception-form label,
+.lookup label,
+.completion-gate form label {
+  display: grid;
+  gap: var(--field-label-gap);
+  min-width: 0;
+  color: var(--text-label-on-fabric);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.query-strip > label,
+.plan-query > label {
+  flex: 1;
+}
+
+.mutation-form .compact-fields {
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.bundle-entry > label,
+.schedule-form > label {
+  min-width: 0;
+}
+
+.lookup .el-input {
+  min-width: min(300px, 100%);
+}
+
+.exception-form {
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)) !important;
+}
+
+.action-card {
+  flex-wrap: wrap;
+}
+
+.action-card > label {
+  flex: 1 1 180px;
+}
+
+.action-card > label:has(.el-textarea) {
+  flex-basis: 100%;
+}
+
+.field-grid .wide,
+.form-grid .wide,
+.compact-fields .wide,
+.inspection-form .wide {
+  grid-column: 1 / -1;
+}
+
+@media (min-width: 768px) and (max-width: 1199px) {
+  .filter-fields {
+    grid-template-columns: minmax(220px, 1fr) minmax(160px, 0.65fr);
+  }
+}
+
+@media (max-width: 767px) {
+  :root {
+    --field-height: 44px;
+  }
+
+  .filter-bar.responsive-filters.is-open {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr);
+    padding: 14px;
+  }
+
+  .filter-bar.responsive-filters:not(.is-open) {
+    display: none !important;
+  }
+
+  .filter-fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .filter-actions,
+  .filter-actions .el-button {
+    width: 100%;
+  }
+
+  .master-form {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .lookup .el-input {
+    min-width: 0;
+  }
+
+  .master-form > *,
+  .master-form .field-wide,
+  .master-form .el-form-item:has(.el-textarea) {
+    grid-column: 1;
+  }
+}

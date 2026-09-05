@@ -216,7 +216,7 @@ defineExpose({ clear, selectFiles })
           <small v-else>上传 {{ row.progress }}%</small>
         </div>
         <i :style="{ '--progress': `${row.progress}%` }" />
-        <button type="button" :disabled="disabled" @click="remove(row.localId)">移除</button>
+        <el-button link :disabled="disabled" @click="remove(row.localId)">移除</el-button>
       </li>
     </ul>
     <p v-if="errorMessage" class="error">{{ errorMessage }}</p>

@@ -97,7 +97,7 @@ describe('订单履约控制塔', () => {
       message: '控制塔暂时不可用',
       traceId: 'trace-dashboard',
     })
-    await wrapper.get('[data-testid="next-page"]').trigger('click')
+    await wrapper.get('.btn-next').trigger('click')
     await flushPromises()
     expect(dashboardApi.orderControlTower).toHaveBeenLastCalledWith({ page: 1, size: 20 })
     expect(wrapper.get('[role="alert"]').text()).toContain('控制塔暂时不可用')

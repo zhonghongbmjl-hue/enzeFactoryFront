@@ -6,7 +6,16 @@ import vueParser from 'vue-eslint-parser'
 import skipFormatting from '@vue/eslint-config-prettier/skip-formatting'
 
 export default tseslint.config(
-  { ignores: ['dist', 'coverage', 'playwright-report', 'test-results'] },
+  {
+    ignores: [
+      'dist',
+      'coverage',
+      'playwright-report',
+      'test-results',
+      'src/auto-imports.d.ts',
+      'src/components.d.ts',
+    ],
+  },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   ...pluginVue.configs['flat/recommended'],

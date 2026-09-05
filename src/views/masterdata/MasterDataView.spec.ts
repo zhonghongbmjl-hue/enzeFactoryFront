@@ -1,6 +1,5 @@
-import { flushPromises, mount } from '@vue/test-utils'
+import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import ElementPlus from 'element-plus'
 import { createPinia, setActivePinia } from 'pinia'
 import { useAuthStore } from '@/stores/auth'
 import MasterDataView from './MasterDataView.vue'
@@ -12,9 +11,42 @@ const api = vi.hoisted(() => ({
   setStatus: vi.fn(),
   select: vi.fn(),
 }))
+
+const SelectFieldStub = {
+  name: 'SelectField',
+  props: ['modelValue', 'options', 'id', 'name', 'dataTestid', 'disabled'],
+  emits: ['update:modelValue', 'change'],
+  template: `<select
+    :id="id"
+    :name="name"
+    :data-testid="dataTestid"
+    :value="modelValue"
+    :disabled="disabled"
+    @change="$emit('update:modelValue', $event.target.value); $emit('change', $event.target.value)"
+  ><option value=""></option><option v-for="item in options" :key="String(item.value)" :value="item.value">{{ item.label }}</option></select>`,
+}
 vi.mock('@/api/masterdata', () => ({
   masterDataApi: api,
 }))
+
+function tabs(wrapper: VueWrapper) {
+  return wrapper.findAll('[role="tab"]')
+}
+
+function selectField(wrapper: VueWrapper, id: string) {
+  const field = wrapper
+    .findAllComponents({ name: 'SelectField' })
+    .find((item) => item.props('id') === id)
+  if (!field) throw new Error(`SelectField #${id} not found`)
+  return field
+}
+
+async function chooseSelectField(wrapper: VueWrapper, id: string, value: string) {
+  const field = selectField(wrapper, id)
+  field.vm.$emit('update:modelValue', value)
+  field.vm.$emit('change', value)
+  await wrapper.vm.$nextTick()
+}
 
 function deferred<T>() {
   let resolve!: (value: T) => void
@@ -53,8 +85,8 @@ describe('MasterDataView', () => {
     }
     return mount(MasterDataView, {
       global: {
-        plugins: [pinia, ElementPlus],
-        stubs: { teleport: true, 'el-pagination': true },
+        plugins: [pinia],
+        stubs: { teleport: true, 'el-pagination': true, SelectField: SelectFieldStub },
       },
     })
   }
@@ -81,7 +113,7 @@ describe('MasterDataView', () => {
       .mockReturnValueOnce(oldOrganizations.promise)
       .mockReturnValueOnce(currentFactories.promise)
     const wrapper = mountView()
-    await wrapper.get('[role="tab"]:nth-child(2)').trigger('click')
+    await tabs(wrapper)[1]!.trigger('click')
     currentFactories.resolve({
       content: [
         {
@@ -121,7 +153,7 @@ describe('MasterDataView', () => {
     const newer = deferred<object>()
     api.list.mockReset().mockReturnValueOnce(older.promise).mockReturnValueOnce(newer.promise)
     const wrapper = mountView()
-    await wrapper.get('[role="tab"]:nth-child(2)').trigger('click')
+    await tabs(wrapper)[1]!.trigger('click')
     older.resolve({ content: [], totalElements: 0 })
     await flushPromises()
     expect(wrapper.get('.master-table-wrap').attributes('aria-busy')).toBe('true')
@@ -167,21 +199,21 @@ describe('MasterDataView', () => {
       },
     )
     const wrapper = mountView()
-    await wrapper.get('[role="tab"]:nth-child(5)').trigger('click')
+    await tabs(wrapper)[4]!.trigger('click')
     await wrapper.get('button[aria-label="新建基础资料"]').trigger('click')
     await vi.waitFor(() => expect(api.select).toHaveBeenCalledWith('organizations', '', 30))
-    await wrapper.get('#md-organization').setValue('org-1')
+    await chooseSelectField(wrapper, 'md-organization', 'org-1')
     await vi.waitFor(() =>
       expect(api.select).toHaveBeenCalledWith('factories', '', 30, { organizationId: 'org-1' }),
     )
-    await wrapper.get('#md-factory').setValue('factory-1')
-    await wrapper.get('#md-organization').setValue('org-2')
+    await chooseSelectField(wrapper, 'md-factory', 'factory-1')
+    await chooseSelectField(wrapper, 'md-organization', 'org-2')
     await vi.waitFor(() =>
       expect(api.select).toHaveBeenCalledWith('factories', '', 30, { organizationId: 'org-2' }),
     )
-    expect((wrapper.get('#md-factory').element as HTMLSelectElement).value).toBe('')
-    await wrapper.get('#md-organization').setValue('org-1')
-    await wrapper.get('#md-factory').setValue('factory-1')
+    expect(selectField(wrapper, 'md-factory').props('modelValue')).toBe('')
+    await chooseSelectField(wrapper, 'md-organization', 'org-1')
+    await chooseSelectField(wrapper, 'md-factory', 'factory-1')
     await wrapper.get('#md-code').setValue('WH1')
     await wrapper.get('#md-name').setValue('主仓')
     await wrapper.get('.master-form').trigger('submit')
@@ -214,10 +246,10 @@ describe('MasterDataView', () => {
       },
     )
     const wrapper = mountView()
-    await wrapper.get('[role="tab"]:nth-child(5)').trigger('click')
+    await tabs(wrapper)[4]!.trigger('click')
     await wrapper.get('button[aria-label="新建基础资料"]').trigger('click')
-    await wrapper.get('#md-organization').setValue('org-1')
-    await wrapper.get('#md-organization').setValue('org-2')
+    await chooseSelectField(wrapper, 'md-organization', 'org-1')
+    await chooseSelectField(wrapper, 'md-organization', 'org-2')
     currentFactories.resolve([{ id: 'f-2', code: 'F2', name: '当前工厂' }])
     await flushPromises()
     oldFactories.resolve([{ id: 'f-1', code: 'F1', name: '过期工厂' }])

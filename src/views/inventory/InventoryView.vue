@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import SelectField from '@/components/form/SelectField.vue'
 import { ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { inventoryApi } from '@/api/inventory'
@@ -103,26 +104,31 @@ async function submitReturn(): Promise<void> {
       </div>
     </header>
 
-    <form class="query-strip" @submit.prevent="load">
+    <el-form class="query-strip" @submit.prevent="load">
       <label>
         <span>物料 ID</span>
-        <input v-model="materialQuery" data-testid="material-query" placeholder="输入物料 UUID" />
+        <el-input
+          v-model="materialQuery"
+          data-testid="material-query"
+          placeholder="输入物料 UUID"
+        />
       </label>
-      <button
-        data-testid="load-inventory"
-        class="ink-button"
-        type="button"
-        :disabled="loading"
-        @click="load"
-      >
+      <el-button data-testid="load-inventory" type="primary" :disabled="loading" @click="load">
         {{ loading ? '校验中…' : '读取批次库存' }}
-      </button>
-    </form>
+      </el-button>
+    </el-form>
 
-    <div v-if="failure" class="error-ticket" role="alert" aria-live="polite">
-      <b>{{ failure }}</b
-      ><small v-if="traceId">追踪号 {{ traceId }}</small>
-    </div>
+    <el-alert
+      v-if="failure"
+      :title="failure"
+      type="error"
+      :closable="false"
+      show-icon
+      role="alert"
+      aria-live="polite"
+    >
+      <span v-if="traceId">追踪号 {{ traceId }}</span>
+    </el-alert>
 
     <div class="balance-grid">
       <article v-for="balance in balances" :key="balance.id" class="balance-ticket">
@@ -154,7 +160,7 @@ async function submitReturn(): Promise<void> {
     </div>
 
     <div class="movement-grid">
-      <form class="movement-card issue" @submit.prevent="submitIssue">
+      <el-form class="movement-card issue" @submit.prevent="submitIssue">
         <header>
           <span>OUT</span>
           <div>
@@ -163,33 +169,37 @@ async function submitReturn(): Promise<void> {
           </div>
         </header>
         <div class="field-grid">
-          <label><span>领料单号</span><input v-model="issue.issueNo" required /></label>
-          <label><span>订单项 ID</span><input v-model="issue.orderItemId" required /></label>
-          <label><span>仓库 ID</span><input v-model="issue.warehouseId" required /></label>
-          <label><span>物料 ID</span><input v-model="issue.materialId" required /></label>
+          <label><span>领料单号</span><el-input v-model="issue.issueNo" required /></label>
+          <label><span>订单项 ID</span><el-input v-model="issue.orderItemId" required /></label>
+          <label><span>仓库 ID</span><el-input v-model="issue.warehouseId" required /></label>
+          <label><span>物料 ID</span><el-input v-model="issue.materialId" required /></label>
           <label
-            ><span>物料类型</span
-            ><select v-model="issue.materialType">
-              <option>FABRIC</option>
-              <option>ACCESSORY</option>
-            </select></label
-          >
-          <label><span>来源批次</span><input v-model="issue.batchNo" /></label>
+            ><span>物料类型</span>
+            <SelectField
+              v-model="issue.materialType"
+              aria-label="物料类型"
+              :options="[
+                { label: '面料（FABRIC）', value: 'FABRIC' },
+                { label: '辅料（ACCESSORY）', value: 'ACCESSORY' },
+              ]"
+            />
+          </label>
+          <label><span>来源批次</span><el-input v-model="issue.batchNo" /></label>
           <label
-            ><span>数量</span
-            ><input
+            ><span>数量</span>
+            <el-input
               v-model="issue.quantity"
-              type="text"
               inputmode="decimal"
               min="0.000001"
               step="0.000001"
               required
-          /></label>
+            />
+          </label>
         </div>
-        <button class="ink-button" type="submit" :disabled="pending">确认领料</button>
-      </form>
+        <el-button type="primary" native-type="submit" :disabled="pending">确认领料</el-button>
+      </el-form>
 
-      <form class="movement-card return" @submit.prevent="submitReturn">
+      <el-form class="movement-card return" @submit.prevent="submitReturn">
         <header>
           <span>IN</span>
           <div>
@@ -198,21 +208,23 @@ async function submitReturn(): Promise<void> {
           </div>
         </header>
         <div class="field-grid single">
-          <label><span>退料单号</span><input v-model="returned.returnNo" required /></label>
-          <label><span>原领料 ID</span><input v-model="returned.materialIssueId" required /></label>
+          <label><span>退料单号</span><el-input v-model="returned.returnNo" required /></label>
           <label
-            ><span>数量</span
-            ><input
+            ><span>原领料 ID</span><el-input v-model="returned.materialIssueId" required
+          /></label>
+          <label
+            ><span>数量</span>
+            <el-input
               v-model="returned.quantity"
-              type="text"
               inputmode="decimal"
               min="0.000001"
               step="0.000001"
               required
-          /></label>
+            />
+          </label>
         </div>
-        <button class="paper-button" type="submit" :disabled="pending">确认退料</button>
-      </form>
+        <el-button native-type="submit" :disabled="pending">确认退料</el-button>
+      </el-form>
     </div>
 
     <article class="ledger-panel">
@@ -294,14 +306,10 @@ async function submitReturn(): Promise<void> {
   letter-spacing: 0.08em;
   margin-bottom: 6px;
 }
-.query-strip input,
-.field-grid input,
-.field-grid select {
-  box-sizing: border-box;
+.query-strip .el-input,
+.field-grid .el-input,
+.field-grid .el-select {
   width: 100%;
-  border: 1px solid #69766e;
-  background: #fffdf7;
-  padding: 12px;
 }
 .ink-button,
 .paper-button {

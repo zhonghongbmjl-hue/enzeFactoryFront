@@ -1,31 +1,15 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
-import { dashboardApi } from '@/api/dashboard'
+import { onMounted } from 'vue'
+import { storeToRefs } from 'pinia'
 import OrderProgressCard from '@/components/dashboard/OrderProgressCard.vue'
-import type { OrderControlTowerPage } from '@/types/dashboard'
+import { CONTROL_TOWER_PAGE_SIZE, useDashboardStore } from '@/stores/dashboard'
 
-const PAGE_SIZE = 20
-const result = ref<OrderControlTowerPage>()
-const page = ref(0)
-const loading = ref(false)
-const failure = ref('')
-const traceId = ref('')
+const dashboard = useDashboardStore()
+const { result, page, loading, failure, traceId } = storeToRefs(dashboard)
+const PAGE_SIZE = CONTROL_TOWER_PAGE_SIZE
 
-async function load(target = page.value): Promise<void> {
-  if (loading.value) return
-  loading.value = true
-  failure.value = ''
-  traceId.value = ''
-  try {
-    result.value = await dashboardApi.orderControlTower({ page: target, size: PAGE_SIZE })
-    page.value = result.value.page
-  } catch (error) {
-    const candidate = error as { message?: string; traceId?: string }
-    failure.value = candidate.message || '订单控制塔加载失败'
-    traceId.value = candidate.traceId || ''
-  } finally {
-    loading.value = false
-  }
+function load(target = page.value): Promise<void> {
+  return dashboard.load(target)
 }
 
 onMounted(() => load())
@@ -46,35 +30,39 @@ onMounted(() => load())
       </aside>
     </header>
 
-    <div v-if="failure" class="tower-error" role="alert" aria-live="polite">
-      <span
-        ><b>{{ failure }}</b
-        ><small v-if="traceId">追踪号 {{ traceId }}</small></span
-      >
-      <button data-testid="retry-control-tower" type="button" @click="load()">重试</button>
-    </div>
+    <el-alert
+      v-if="failure"
+      type="error"
+      :closable="false"
+      show-icon
+      role="alert"
+      aria-live="polite"
+    >
+      <template #title>
+        {{ failure }}
+        <small v-if="traceId">追踪号 {{ traceId }}</small>
+      </template>
+      <el-button data-testid="retry-control-tower" @click="load()">重试</el-button>
+    </el-alert>
 
     <div v-if="result?.content.length" class="order-card-grid">
       <OrderProgressCard v-for="order in result.content" :key="order.orderId" :order="order" />
     </div>
-    <div v-else-if="!loading && !failure" class="tower-empty">
-      <b>当前没有可跟踪订单</b>
-      <span>新订单通过审核后将自动进入控制塔。</span>
-    </div>
+    <el-empty
+      v-else-if="!loading && !failure"
+      description="当前没有可跟踪订单。新订单通过审核后将自动进入控制塔。"
+    />
 
     <footer v-if="result && result.totalPages > 0" class="tower-pagination">
-      <button type="button" :disabled="loading || page === 0" @click="load(page - 1)">
-        ← 上一页
-      </button>
       <span>第 {{ page + 1 }} / {{ result.totalPages }} 页</span>
-      <button
-        data-testid="next-page"
-        type="button"
-        :disabled="loading || page + 1 >= result.totalPages"
-        @click="load(page + 1)"
-      >
-        下一页 →
-      </button>
+      <el-pagination
+        :current-page="page + 1"
+        :page-size="PAGE_SIZE"
+        :total="result.totalElements"
+        layout="prev, pager, next"
+        :disabled="loading"
+        @current-change="(next: number) => load(next - 1)"
+      />
     </footer>
   </section>
 </template>

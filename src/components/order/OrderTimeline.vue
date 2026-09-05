@@ -34,28 +34,30 @@ const meters = computed(() => [
 
 <template>
   <section class="order-timeline-panel">
-    <div class="order-stage-scroll">
-      <ol class="order-stage-line" aria-label="订单生命周期">
-        <li
-          v-for="(stage, index) in stages"
-          :key="stage.status"
-          :class="{ done: currentIndex >= index, current: currentIndex === index }"
-          :aria-current="currentIndex === index ? 'step' : undefined"
-        >
-          <b>{{ String(index + 1).padStart(2, '0') }}</b
-          ><span>{{ stage.label }}</span>
-        </li>
-      </ol>
-    </div>
-    <p v-if="status === 'DRAFT'" class="timeline-note">订单仍在草稿阶段，提交后进入审核流程。</p>
-    <p v-if="status === 'CANCELLED'" class="timeline-note danger">订单已取消，生命周期停止。</p>
+    <el-steps :active="Math.max(currentIndex, 0)" finish-status="success" align-center>
+      <el-step v-for="stage in stages" :key="stage.status" :title="stage.label" />
+    </el-steps>
+    <el-alert
+      v-if="status === 'DRAFT'"
+      title="订单仍在草稿阶段，提交后进入审核流程。"
+      type="info"
+      :closable="false"
+      class="timeline-note"
+    />
+    <el-alert
+      v-if="status === 'CANCELLED'"
+      title="订单已取消，生命周期停止。"
+      type="error"
+      :closable="false"
+      class="timeline-note"
+    />
     <div class="order-progress-grid" aria-label="订单执行进度">
       <div v-for="meter in meters" :key="meter.label" class="order-meter">
         <span
           ><b>{{ meter.label }}</b
           ><strong>{{ meter.value }}%</strong></span
         >
-        <progress :value="meter.value" max="100">{{ meter.value }}%</progress>
+        <el-progress :percentage="meter.value" :stroke-width="10" />
       </div>
     </div>
   </section>

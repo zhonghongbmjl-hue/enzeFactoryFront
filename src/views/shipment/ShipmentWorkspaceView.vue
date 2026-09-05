@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import SelectField from '@/components/form/SelectField.vue'
 import { computed, onUnmounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { shipmentApi } from '@/api/shipment'
@@ -294,17 +295,17 @@ onUnmounted(() => {
       </div>
       <span class="order-chip">订单 {{ orderId }}</span>
     </header>
-    <p v-if="error" role="alert" class="alert">{{ error }}</p>
-    <div v-if="flight" class="pending">
+    <el-alert v-if="error" :title="error" type="error" :closable="false" show-icon role="alert" />
+    <el-alert v-if="flight" type="warning" :closable="false" show-icon role="status">
       <span>{{
         flight.status === 'OUTCOME_UNKNOWN'
           ? '请求结果待确认，请保留原幂等请求'
           : '发运请求处理中，正在同步权威事实'
       }}</span>
-      <button v-if="flight.status === 'OUTCOME_UNKNOWN'" type="button" @click="retryOutcomeUnknown">
+      <el-button v-if="flight.status === 'OUTCOME_UNKNOWN'" @click="retryOutcomeUnknown">
         用原请求重试确认
-      </button>
-    </div>
+      </el-button>
+    </el-alert>
     <section v-if="workspace" class="facts" aria-label="包装数量守恒">
       <strong>质量合格 {{ workspace.qualityPassedQuantity }}</strong
       ><strong>已装箱 {{ workspace.packedQuantity }}</strong
@@ -319,29 +320,29 @@ onUnmounted(() => {
       >
     </section>
     <section v-if="canManage && workspace" class="forms">
-      <form @submit.prevent="pack">
+      <el-form @submit.prevent="pack">
         <h2>质量合格品装箱</h2>
-        <label>箱号<input v-model="boxNo" maxlength="80" /></label
-        ><label>质检批次 ID<input v-model="qualityInspectionId" maxlength="64" /></label
-        ><label
-          >装箱数量<input
-            v-model="packingQuantity"
-            inputmode="decimal"
-            placeholder="0.000000" /></label
-        ><button :disabled="!!flight">确认装箱</button>
-      </form>
-      <form data-testid="create-shipment-form" @submit.prevent="createShipment">
+        <label>箱号<el-input v-model="boxNo" maxlength="80" /></label>
+        <label>质检批次 ID<el-input v-model="qualityInspectionId" maxlength="64" /></label>
+        <label
+          >装箱数量
+          <el-input v-model="packingQuantity" inputmode="decimal" placeholder="0.000000" />
+        </label>
+        <el-button type="primary" native-type="submit" :disabled="!!flight">确认装箱</el-button>
+      </el-form>
+      <el-form data-testid="create-shipment-form" @submit.prevent="createShipment">
         <h2>创建发运单</h2>
         <fieldset v-for="box in workspace.boxes" :key="box.id">
           <legend>{{ box.boxNo }}</legend>
           <label v-for="line in box.lines ?? []" :key="line.id" class="line-input">
-            <input
-              v-model="selectedPackingItems[line.id]"
-              type="checkbox"
+            <el-checkbox
+              :model-value="selectedPackingItems[line.id] ?? false"
               :data-testid="`shipment-select-${line.id}`"
+              :aria-label="`选择 SKU ${line.skuId}`"
+              @update:model-value="selectedPackingItems[line.id] = Boolean($event)"
             />
             <span>SKU {{ line.skuId }} / 可选 {{ line.quantity }}</span>
-            <input
+            <el-input
               v-model="shipmentQuantity[line.id]"
               :disabled="!selectedPackingItems[line.id]"
               inputmode="decimal"
@@ -350,44 +351,62 @@ onUnmounted(() => {
             />
           </label>
         </fieldset>
-        <button data-testid="create-shipment" :disabled="!!flight">创建发运单</button>
-      </form>
+        <el-button
+          data-testid="create-shipment"
+          type="primary"
+          native-type="submit"
+          :disabled="!!flight"
+        >
+          创建发运单
+        </el-button>
+      </el-form>
     </section>
     <section v-if="canAfterSales && workspace" class="after-sales-panel">
-      <form data-testid="after-sales-create-form" @submit.prevent="createAfterSales">
+      <el-form data-testid="after-sales-create-form" @submit.prevent="createAfterSales">
         <h2>登记客户反馈与退货</h2>
         <label
-          >已签收原发运明细<select v-model="afterSalesSourceId" data-testid="after-sales-source">
-            <option value="">请选择</option>
-            <option
-              v-for="source in eligibleAfterSalesLines"
-              :key="source.line.id"
-              :value="source.line.id"
-            >
-              SKU {{ source.line.skuId }} / 已签收 {{ source.line.signedQuantity }}
-            </option>
-          </select></label
-        ><label
-          >退货数量<input
+          >已签收原发运明细<SelectField
+            v-model="afterSalesSourceId"
+            data-testid="after-sales-source"
+            placeholder="请选择"
+            :options="
+              eligibleAfterSalesLines.map((source) => ({
+                value: source.line.id,
+                label: `SKU ${source.line.skuId} / 已签收 ${source.line.signedQuantity}`,
+              }))
+            "
+        /></label>
+        <label
+          >退货数量
+          <el-input
             v-model="afterSalesQuantity"
             data-testid="after-sales-quantity"
             inputmode="decimal"
-            placeholder="0.000000" /></label
-        ><label
-          >原因代码<input
-            v-model="afterSalesReason"
-            data-testid="after-sales-reason"
-            maxlength="120"
-        /></label>
+            placeholder="0.000000"
+          />
+        </label>
         <label
-          >客户反馈<textarea
+          >原因代码
+          <el-input v-model="afterSalesReason" data-testid="after-sales-reason" maxlength="120" />
+        </label>
+        <label
+          >客户反馈
+          <el-input
             v-model="customerFeedback"
+            type="textarea"
             data-testid="after-sales-feedback"
             maxlength="500"
           />
         </label>
-        <button data-testid="create-after-sales" :disabled="!!flight">创建售后任务</button>
-      </form>
+        <el-button
+          data-testid="create-after-sales"
+          type="primary"
+          native-type="submit"
+          :disabled="!!flight"
+        >
+          创建售后任务
+        </el-button>
+      </el-form>
     </section>
     <section v-if="workspace" class="after-sales-list">
       <h2>待处理售后</h2>
@@ -436,34 +455,38 @@ onUnmounted(() => {
                 item.status,
               )
             "
-            >本次数量<input
+            >本次数量
+            <el-input
               v-model="progressQuantity[line.id]"
               inputmode="decimal"
               placeholder="0.000000"
               :data-testid="`progress-${line.id}`"
-          /></label>
+            />
+          </label>
         </div>
         <div class="actions">
-          <button
+          <el-button
             v-if="canManage && item.status === 'DRAFT'"
+            type="primary"
             :disabled="!!flight"
             :data-testid="`request-shipment-${item.id}`"
             @click="approval(item, 'requestApproval')"
           >
             申请发运审批
-          </button>
-          <button
+          </el-button>
+          <el-button
             v-if="
               canApprove &&
               item.status === 'PENDING_APPROVAL' &&
               item.requesterId !== auth.profile?.userId
             "
+            type="primary"
             :disabled="!!flight"
             :data-testid="`approve-${item.id}`"
             @click="approval(item, 'approve')"
           >
             审批通过
-          </button>
+          </el-button>
           <p
             v-else-if="
               canApprove &&
@@ -482,22 +505,26 @@ onUnmounted(() => {
                 item.status,
               )
             "
-            ><button
+          >
+            <el-button
               v-if="['APPROVED', 'PARTIALLY_DISPATCHED'].includes(item.status)"
+              type="primary"
               :disabled="!!flight"
               :data-testid="`dispatch-${item.id}`"
               @click="progress(item, 'dispatch')"
             >
-              登记发运</button
-            ><button
+              登记发运
+            </el-button>
+            <el-button
               v-if="['DISPATCHED', 'PARTIALLY_SIGNED'].includes(item.status)"
+              type="primary"
               :disabled="!!flight"
               :data-testid="`sign-${item.id}`"
               @click="progress(item, 'sign')"
             >
               登记签收
-            </button></template
-          >
+            </el-button>
+          </template>
         </div>
       </article>
     </section>
@@ -565,22 +592,6 @@ form label,
   display: grid;
   gap: 4px;
   margin: 8px 0;
-}
-input,
-select,
-button {
-  min-height: 38px;
-  border: 1px solid #777;
-  background: #fff;
-  padding: 7px;
-}
-button {
-  background: #17202a;
-  color: #fff;
-  cursor: pointer;
-}
-button:disabled {
-  opacity: 0.5;
 }
 .shipments article {
   display: grid;

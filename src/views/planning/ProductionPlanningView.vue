@@ -128,10 +128,17 @@ async function approve(): Promise<void> {
       </div>
     </header>
 
-    <div v-if="failure" class="planning-error" role="alert" aria-live="polite">
-      <b>{{ failure }}</b
-      ><small v-if="traceId">追踪号 {{ traceId }}</small>
-    </div>
+    <el-alert
+      v-if="failure"
+      :title="failure"
+      type="error"
+      :closable="false"
+      show-icon
+      role="alert"
+      aria-live="polite"
+    >
+      <span v-if="traceId">追踪号 {{ traceId }}</span>
+    </el-alert>
 
     <div class="dispatch-grid">
       <article class="dispatch-card input-card">
@@ -142,89 +149,117 @@ async function approve(): Promise<void> {
             <h2>新建人工排程</h2>
           </div>
         </header>
-        <form data-testid="planning-form" class="planning-form" @submit.prevent="createPlan">
+        <el-form data-testid="planning-form" class="planning-form" @submit.prevent="createPlan">
           <fieldset :disabled="pending">
             <legend>订单与齐套来源</legend>
             <label
-              >订单 ID<input v-model.trim="form.orderId" name="orderId" required autocomplete="off"
+              >订单 ID<el-input
+                v-model.trim="form.orderId"
+                name="orderId"
+                required
+                autocomplete="off"
             /></label>
             <label
-              >订单项 ID<input
+              >订单项 ID
+              <el-input
                 v-model.trim="form.orderItemId"
                 name="orderItemId"
                 required
                 autocomplete="off"
+              />
+            </label>
+            <label
+              >SKU ID<el-input v-model.trim="form.skuId" name="skuId" required autocomplete="off"
             /></label>
             <label
-              >SKU ID<input v-model.trim="form.skuId" name="skuId" required autocomplete="off"
-            /></label>
-            <label
-              >齐套释放 ID<input
+              >齐套释放 ID
+              <el-input
                 v-model.trim="form.kittingReleaseId"
                 name="kittingReleaseId"
                 required
                 autocomplete="off"
-            /></label>
+              />
+            </label>
           </fieldset>
           <fieldset :disabled="pending">
             <legend>生产资源链</legend>
             <label
-              >工厂 ID<input
+              >工厂 ID
+              <el-input
                 v-model.trim="form.factoryId"
                 name="factoryId"
                 required
                 autocomplete="off"
-            /></label>
+              />
+            </label>
             <label
-              >车间 ID<input
+              >车间 ID
+              <el-input
                 v-model.trim="form.workshopId"
                 name="workshopId"
                 required
                 autocomplete="off"
-            /></label>
+              />
+            </label>
             <label class="span-two"
-              >产线 ID<input
+              >产线 ID
+              <el-input
                 v-model.trim="form.productionLineId"
                 name="productionLineId"
                 required
                 autocomplete="off"
-            /></label>
+              />
+            </label>
           </fieldset>
           <fieldset class="schedule-fields" :disabled="pending">
             <legend>排程窗口</legend>
             <label
-              >排产数量<input
+              >排产数量
+              <el-input
                 v-model.trim="form.quantity"
                 name="quantity"
                 required
                 inputmode="decimal"
                 autocomplete="off"
-            /></label>
+              />
+            </label>
             <label
-              >计划批次<input
+              >计划批次
+              <el-input
                 v-model.trim="form.plannedBatchCode"
                 name="plannedBatchCode"
                 required
                 maxlength="64"
                 autocomplete="off"
-            /></label>
+              />
+            </label>
             <label
-              >开始日期<input v-model="form.startDate" name="startDate" required type="date"
+              >开始日期<input
+                v-model="form.startDate"
+                class="native-control"
+                name="startDate"
+                required
+                type="date"
             /></label>
             <label
               >结束日期<input
                 v-model="form.endDate"
+                class="native-control"
                 name="endDate"
                 required
                 type="date"
                 :min="form.startDate"
             /></label>
           </fieldset>
-          <button class="dispatch-action" type="submit" :disabled="pending || !readyToSubmit">
-            <span>{{ pending ? '锁定资源中…' : '创建排产草案' }}</span
-            ><b>→</b>
-          </button>
-        </form>
+          <el-button
+            class="dispatch-action"
+            type="primary"
+            native-type="submit"
+            :disabled="pending || !readyToSubmit"
+          >
+            {{ pending ? '锁定资源中…' : '创建排产草案' }}
+          </el-button>
+        </el-form>
       </article>
 
       <article class="dispatch-card status-card">
@@ -235,15 +270,15 @@ async function approve(): Promise<void> {
             <h2>排程签发</h2>
           </div>
         </header>
-        <form class="plan-query" @submit.prevent="loadPlan">
-          <input
+        <el-form class="plan-query" @submit.prevent="loadPlan">
+          <el-input
             v-model="query"
             aria-label="排产计划 ID"
             placeholder="输入排产计划 UUID"
             :disabled="pending"
           />
-          <button type="submit" :disabled="pending">读取</button>
-        </form>
+          <el-button type="primary" native-type="submit" :disabled="pending">读取</el-button>
+        </el-form>
         <template v-if="plan && schedule">
           <div class="approval-banner" :class="plan.status.toLowerCase()">
             <small>审批状态</small>
@@ -284,15 +319,15 @@ async function approve(): Promise<void> {
             <b>{{ plan.status === 'APPROVED' ? '工单门已开启' : '仅已审批排程可下推工单' }}</b>
             <small>Task 12 将只读取 APPROVED 排程。</small>
           </aside>
-          <button
+          <el-button
             v-if="plan.status === 'DRAFT'"
             class="approve-action"
-            type="button"
+            type="primary"
             :disabled="pending || Boolean(failure)"
             @click="approve"
           >
             审批并签发排程
-          </button>
+          </el-button>
         </template>
         <div v-else class="empty-schedule">
           <span>⌁</span><b>等待排程草案</b
@@ -410,22 +445,10 @@ async function approve(): Promise<void> {
   font-size: 11px;
   font-weight: 800;
 }
-.planning-form input,
-.plan-query input {
+.planning-form .el-input,
+.plan-query .native-control {
   width: 100%;
   min-width: 0;
-  height: 42px;
-  padding: 0 10px;
-  color: #142820;
-  background: #fff;
-  border: 1px solid #9aa49e;
-  border-radius: 0;
-}
-.planning-form input:focus,
-.plan-query input:focus {
-  border-color: #e6672f;
-  box-shadow: inset 4px 0 #e6672f;
-  outline: 0;
 }
 .span-two {
   grid-column: 1 / -1;

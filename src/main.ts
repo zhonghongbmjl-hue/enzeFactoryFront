@@ -1,12 +1,15 @@
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
+import ElementPlus from 'element-plus'
+import zhCn from 'element-plus/es/locale/lang/zh-cn'
 import App from './App.vue'
 import { createApplicationRouter } from './router'
 import { useAuthStore } from './stores/auth'
+import './stores'
 import { configureAuthRuntime } from './api/http'
 import { createUnauthorizedHandler } from './authBoundary'
-import 'element-plus/es/components/message/style/css'
 import './styles/main.css'
+import './styles/form-system.css'
 
 const app = createApp(App)
 const pinia = createPinia()
@@ -21,4 +24,5 @@ configureAuthRuntime({
 
 app.use(pinia)
 app.use(router)
+app.use(ElementPlus, { locale: zhCn } as never)
 app.mount('#app')

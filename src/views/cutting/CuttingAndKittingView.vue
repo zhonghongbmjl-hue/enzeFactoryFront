@@ -210,10 +210,17 @@ async function scheduleKitting(item: KittingRelease): Promise<void> {
       </div>
     </header>
 
-    <div v-if="failure" class="error-ticket" role="alert" aria-live="polite">
-      <b>{{ failure }}</b
-      ><small v-if="traceId">追踪号 {{ traceId }}</small>
-    </div>
+    <el-alert
+      v-if="failure"
+      :title="failure"
+      type="error"
+      :closable="false"
+      show-icon
+      role="alert"
+      aria-live="polite"
+    >
+      <span v-if="traceId">追踪号 {{ traceId }}</span>
+    </el-alert>
 
     <div class="dual-workbench">
       <article class="work-panel cutting-panel">
@@ -224,34 +231,44 @@ async function scheduleKitting(item: KittingRelease): Promise<void> {
           </div>
           <span class="panel-number">01</span>
         </header>
-        <form
+        <el-form
           data-testid="create-cutting-form"
           class="mutation-form"
           @submit.prevent="createCutting"
         >
           <h3>创建裁剪任务</h3>
           <div class="compact-fields">
-            <input v-model="createForm.cuttingNo" required placeholder="裁剪单号" />
-            <input v-model="createForm.materialIssueId" required placeholder="领料 ID" />
-            <input v-model="createForm.orderItemId" required placeholder="订单项 ID" />
-            <input v-model="createForm.skuId" required placeholder="SKU ID" />
-            <input v-model="createForm.productionBatch" required placeholder="生产批次" />
-            <input v-model="createForm.sourceFabricLot" required placeholder="来源布批" />
-            <input
-              v-model="createForm.inputQuantity"
-              required
-              inputmode="decimal"
-              placeholder="投入数量"
-            />
+            <label>裁剪单号<el-input v-model="createForm.cuttingNo" required /></label>
+            <label>领料 ID<el-input v-model="createForm.materialIssueId" required /></label>
+            <label>订单项 ID<el-input v-model="createForm.orderItemId" required /></label>
+            <label>SKU ID<el-input v-model="createForm.skuId" required /></label>
+            <label>生产批次<el-input v-model="createForm.productionBatch" required /></label>
+            <label>来源布批<el-input v-model="createForm.sourceFabricLot" required /></label>
+            <label
+              >投入数量<el-input
+                v-model="createForm.inputQuantity"
+                required
+                inputmode="decimal"
+                placeholder="0.000000"
+            /></label>
           </div>
-          <button type="submit" :disabled="pending || !isPositiveDecimal(createForm.inputQuantity)">
+          <el-button
+            type="primary"
+            native-type="submit"
+            :disabled="pending || !isPositiveDecimal(createForm.inputQuantity)"
+          >
             创建并占用领布
-          </button>
-        </form>
-        <form class="query-strip" @submit.prevent="loadCutting">
-          <input v-model="cuttingQuery" data-testid="cutting-query" placeholder="裁剪任务 UUID" />
-          <button data-testid="load-cutting" type="button" @click="loadCutting">读取</button>
-        </form>
+          </el-button>
+        </el-form>
+        <el-form class="query-strip" @submit.prevent="loadCutting">
+          <label
+            >裁剪任务 ID<el-input
+              v-model="cuttingQuery"
+              data-testid="cutting-query"
+              placeholder="输入 UUID"
+          /></label>
+          <el-button data-testid="load-cutting" @click="loadCutting">读取</el-button>
+        </el-form>
 
         <template v-if="cutting">
           <div class="state-line">
@@ -291,73 +308,82 @@ async function scheduleKitting(item: KittingRelease): Promise<void> {
             </div>
           </dl>
           <div class="state-actions">
-            <button
+            <el-button
               v-if="cutting.status === 'DRAFT'"
-              type="button"
               :disabled="pending"
               @click="transition('release')"
             >
               下达裁剪
-            </button>
-            <button
+            </el-button>
+            <el-button
               v-if="cutting.status === 'RELEASED'"
-              type="button"
               :disabled="pending"
               @click="transition('start')"
             >
               开始裁剪
-            </button>
+            </el-button>
           </div>
-          <form
+          <el-form
             data-testid="complete-cutting-form"
             class="mutation-form"
             @submit.prevent="completeCutting"
           >
             <h3>完工与裁片包</h3>
             <div class="compact-fields">
-              <input
-                v-model="completeForm.outputQuantity"
-                required
-                inputmode="decimal"
-                placeholder="裁片产出"
-              />
-              <input
-                v-model="completeForm.lossQuantity"
-                required
-                inputmode="decimal"
-                placeholder="损耗"
-              />
-              <input
-                v-model="completeForm.excessReturnQuantity"
-                required
-                inputmode="decimal"
-                placeholder="余料回库"
-              />
-              <input
-                v-if="isPositiveDecimal(completeForm.excessReturnQuantity)"
-                v-model="completeForm.returnNo"
-                required
-                placeholder="退料单号"
-              />
+              <label
+                >裁片产出<el-input
+                  v-model="completeForm.outputQuantity"
+                  required
+                  inputmode="decimal"
+                  placeholder="0.000000"
+              /></label>
+              <label
+                >损耗<el-input
+                  v-model="completeForm.lossQuantity"
+                  required
+                  inputmode="decimal"
+                  placeholder="0.000000"
+              /></label>
+              <label
+                >余料回库<el-input
+                  v-model="completeForm.excessReturnQuantity"
+                  required
+                  inputmode="decimal"
+                  placeholder="0.000000"
+              /></label>
+              <label v-if="isPositiveDecimal(completeForm.excessReturnQuantity)"
+                >退料单号<el-input v-model="completeForm.returnNo" required
+              /></label>
             </div>
             <div v-for="(line, index) in bundleLines" :key="index" class="bundle-entry">
-              <input v-model="line.bundleNo" required placeholder="裁片包号" />
-              <input v-model="line.quantity" required inputmode="decimal" placeholder="包数量" />
-              <button
+              <label>裁片包号<el-input v-model="line.bundleNo" required /></label>
+              <label
+                >包数量<el-input
+                  v-model="line.quantity"
+                  required
+                  inputmode="decimal"
+                  placeholder="0.000000"
+              /></label>
+              <el-button
                 v-if="bundleLines.length > 1"
-                type="button"
+                link
+                type="primary"
                 @click="bundleLines.splice(index, 1)"
               >
                 移除
-              </button>
+              </el-button>
             </div>
-            <button type="button" @click="bundleLines.push({ bundleNo: '', quantity: '0' })">
+            <el-button @click="bundleLines.push({ bundleNo: '', quantity: '0' })">
               增加裁片包
-            </button>
-            <button type="submit" :disabled="pending || cutting.status !== 'CUTTING'">
+            </el-button>
+            <el-button
+              type="primary"
+              native-type="submit"
+              :disabled="pending || cutting.status !== 'CUTTING'"
+            >
               确认完工
-            </button>
-          </form>
+            </el-button>
+          </el-form>
           <section class="bundle-stack">
             <header>
               <h3>裁片包</h3>
@@ -383,22 +409,27 @@ async function scheduleKitting(item: KittingRelease): Promise<void> {
           </div>
           <span class="panel-number">02</span>
         </header>
-        <form
+        <el-form
           data-testid="create-kitting-form"
           class="mutation-form"
           @submit.prevent="createKitting"
         >
           <h3>按实绩检查齐套</h3>
           <div class="compact-fields">
-            <input v-model="checkForm.orderItemId" required placeholder="订单项 ID" />
-            <input v-model="checkForm.skuId" required placeholder="SKU ID" />
+            <label>订单项 ID<el-input v-model="checkForm.orderItemId" required /></label>
+            <label>SKU ID<el-input v-model="checkForm.skuId" required /></label>
           </div>
-          <button type="submit" :disabled="pending">重算齐套</button>
-        </form>
-        <form class="query-strip" @submit.prevent="loadKitting">
-          <input v-model="kittingQuery" data-testid="kitting-query" placeholder="齐套检查 UUID" />
-          <button data-testid="load-kitting" type="button" @click="loadKitting">读取</button>
-        </form>
+          <el-button type="primary" native-type="submit" :disabled="pending">重算齐套</el-button>
+        </el-form>
+        <el-form class="query-strip" @submit.prevent="loadKitting">
+          <label
+            >齐套检查 ID<el-input
+              v-model="kittingQuery"
+              data-testid="kitting-query"
+              placeholder="输入 UUID"
+          /></label>
+          <el-button data-testid="load-kitting" @click="loadKitting">读取</el-button>
+        </el-form>
 
         <template v-if="kitting">
           <div class="minimum-card">
@@ -432,18 +463,20 @@ async function scheduleKitting(item: KittingRelease): Promise<void> {
               ><b data-testid="release-remainder">{{ kitting.remainingQuantity }}</b>
             </div>
           </div>
-          <form class="release-form" @submit.prevent="releaseKitting">
+          <el-form class="release-form" @submit.prevent="releaseKitting">
             <label
-              ><span>本次释放数量</span
-              ><input
+              ><span>本次释放数量</span>
+              <el-input
                 v-model="releaseQuantity"
-                type="text"
                 inputmode="decimal"
                 min="0.000001"
                 :max="kitting.remainingQuantity"
-                step="0.000001" /></label
-            ><button
-              type="submit"
+                step="0.000001"
+              />
+            </label>
+            <el-button
+              type="primary"
+              native-type="submit"
               :disabled="
                 pending ||
                 !isPositiveDecimal(releaseQuantity) ||
@@ -451,8 +484,8 @@ async function scheduleKitting(item: KittingRelease): Promise<void> {
               "
             >
               释放至排产池
-            </button>
-          </form>
+            </el-button>
+          </el-form>
           <section class="release-history">
             <header>
               <h3>释放记录</h3>
@@ -464,28 +497,30 @@ async function scheduleKitting(item: KittingRelease): Promise<void> {
                 ><b>释放 {{ item.quantity }}</b
                 ><span>已排产 {{ item.scheduledQuantity }}</span
                 ><small>余 {{ item.remainingForScheduling }}</small>
-                <form
+                <el-form
                   class="schedule-form"
                   :data-testid="`schedule-form-${item.id}`"
                   @submit.prevent="scheduleKitting(item)"
                 >
-                  <input
-                    v-model="scheduleReferences[item.id]"
-                    :data-testid="`schedule-reference-${item.id}`"
-                    required
-                    maxlength="64"
-                    placeholder="稳定排产引用 / 批次号"
-                  />
-                  <input
-                    v-model="scheduleQuantities[item.id]"
-                    :data-testid="`schedule-quantity-${item.id}`"
-                    required
-                    inputmode="decimal"
-                    placeholder="排产数量"
-                  />
-                  <button
+                  <label
+                    >排产引用 / 批次号<el-input
+                      v-model="scheduleReferences[item.id]"
+                      :data-testid="`schedule-reference-${item.id}`"
+                      required
+                      maxlength="64"
+                  /></label>
+                  <label
+                    >排产数量<el-input
+                      v-model="scheduleQuantities[item.id]"
+                      :data-testid="`schedule-quantity-${item.id}`"
+                      required
+                      inputmode="decimal"
+                      placeholder="0.000000"
+                  /></label>
+                  <el-button
                     :data-testid="`schedule-${item.id}`"
-                    type="submit"
+                    type="primary"
+                    native-type="submit"
                     :disabled="
                       pending ||
                       !scheduleReferences[item.id]?.trim() ||
@@ -497,8 +532,8 @@ async function scheduleKitting(item: KittingRelease): Promise<void> {
                     "
                   >
                     占用排产
-                  </button>
-                </form>
+                  </el-button>
+                </el-form>
               </li>
             </ol>
           </section>
@@ -597,11 +632,9 @@ async function scheduleKitting(item: KittingRelease): Promise<void> {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
 }
-.compact-fields input,
-.bundle-entry input {
+.compact-fields .el-input,
+.bundle-entry .el-input {
   min-width: 0;
-  padding: 9px;
-  border: 1px solid #657168;
 }
 .bundle-entry {
   display: grid;
@@ -615,12 +648,9 @@ async function scheduleKitting(item: KittingRelease): Promise<void> {
   padding: 9px 12px;
   font-weight: 800;
 }
-.query-strip input {
+.query-strip .el-input {
   flex: 1;
   min-width: 0;
-  padding: 11px;
-  border: 1px solid #536058;
-  background: #fff;
 }
 .query-strip button,
 .state-actions button,
@@ -764,11 +794,8 @@ async function scheduleKitting(item: KittingRelease): Promise<void> {
   font-size: 12px;
   font-weight: 900;
 }
-.release-form input {
-  box-sizing: border-box;
+.release-form .el-input {
   width: 100%;
-  padding: 10px;
-  border: 1px solid #566259;
 }
 .release-history li {
   display: grid;

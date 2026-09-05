@@ -1,0 +1,157 @@
+:root {
+  --el-color-primary: var(--orange-500);
+  --el-color-primary-light-3: #f28b58;
+  --el-color-primary-light-5: #f6ad88;
+  --el-color-primary-light-7: #f9cebb;
+  --el-color-primary-light-8: #fbdfd1;
+  --el-color-primary-light-9: #fdf0e8;
+  --el-color-primary-dark-2: var(--orange-600);
+  --el-color-success: var(--green-400);
+  --el-text-color-primary: var(--ink-900);
+  --el-text-color-regular: var(--text-secondary-on-fabric);
+  --el-text-color-secondary: var(--text-muted-on-fabric);
+  --el-bg-color: #fff;
+  --el-bg-color-page: var(--fabric-50);
+  --el-border-color: var(--line);
+  --el-border-color-light: var(--line);
+  --el-fill-color-light: var(--fabric-100);
+  --el-font-family: 'Noto Sans SC', 'Microsoft YaHei UI', 'Microsoft YaHei', sans-serif;
+  --el-menu-bg-color: var(--ink-900);
+  --el-menu-text-color: rgba(248, 244, 233, 0.64);
+  --el-menu-hover-bg-color: rgba(248, 244, 233, 0.08);
+  --el-menu-hover-text-color: #fff;
+  --el-menu-active-color: var(--ink-900);
+}
+
+.admin-shell {
+  min-height: 100vh;
+}
+
+.admin-shell > .el-aside {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  color: var(--fabric-50);
+  background: var(--ink-900);
+  border-right: 4px solid var(--orange-500);
+}
+
+.admin-shell .brand-mark {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 20px 16px 12px;
+  color: inherit;
+  text-decoration: none;
+}
+
+.admin-shell .brand-glyph {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  color: var(--ink-900);
+  background: var(--fabric-50);
+  font:
+    800 14px Consolas,
+    monospace;
+  clip-path: polygon(0 0, 85% 0, 100% 25%, 100% 100%, 0 100%);
+}
+
+.admin-shell .brand-copy {
+  display: grid;
+}
+
+.admin-shell .brand-copy b {
+  font-family: STZhongsong, SimSun, serif;
+  font-size: 20px;
+}
+
+.admin-shell .brand-copy small {
+  color: var(--text-muted-on-ink);
+  font:
+    9px Consolas,
+    monospace;
+  letter-spacing: 0.16em;
+}
+
+.admin-shell .el-menu {
+  flex: 1;
+  overflow: auto;
+  border-right: none;
+}
+
+.admin-shell .el-menu-item.is-active {
+  background: var(--fabric-50) !important;
+  color: var(--ink-900) !important;
+}
+
+.admin-shell .el-menu-item:hover {
+  color: #fff;
+}
+
+.admin-shell .rail-status {
+  margin: 12px 16px 20px;
+}
+
+.admin-shell .el-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  height: 88px;
+  padding: 16px clamp(22px, 4vw, 58px);
+  background: rgba(248, 244, 233, 0.88);
+  border-bottom: 1px solid var(--line);
+  backdrop-filter: blur(12px);
+}
+
+.admin-shell .header-copy .eyebrow {
+  color: var(--text-label-on-fabric);
+}
+
+.admin-shell .operator {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.admin-shell .operator-copy {
+  display: grid;
+  min-width: 90px;
+}
+
+.admin-shell .operator-copy small {
+  color: var(--text-muted-on-fabric);
+}
+
+.admin-shell .el-main {
+  padding: clamp(22px, 4vw, 58px);
+  background: transparent;
+}
+
+.admin-shell.is-collapsed .brand-copy,
+.admin-shell.is-collapsed .rail-status span {
+  display: none;
+}
+
+.admin-shell.is-collapsed .brand-mark {
+  justify-content: center;
+  margin-inline: 8px;
+}
+
+@media (max-width: 560px) {
+  .admin-shell .el-header {
+    height: 72px;
+    padding: 12px 18px;
+  }
+
+  .admin-shell .header-copy,
+  .admin-shell .operator-copy {
+    display: none;
+  }
+
+  .admin-shell .el-main {
+    padding: 24px 18px;
+  }
+}

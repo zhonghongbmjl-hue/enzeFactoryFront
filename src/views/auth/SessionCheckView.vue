@@ -20,13 +20,17 @@ async function retry(): Promise<void> {
 </script>
 
 <template>
-  <main class="error-stage session-check-stage">
-    <p class="error-code">SESSION CHECK / 安全停留</p>
-    <h1>暂时无法核验登录状态</h1>
-    <p>{{ auth.sessionValidationMessage || '服务端暂时不可达，请检查网络后重试。' }}</p>
-    <p>为保护工厂数据，核验完成前不会开放业务页面，也不会把网络故障误判为凭证失效。</p>
-    <button class="primary-action compact" type="button" :disabled="retrying" @click="retry">
-      {{ retrying ? '正在重新核验…' : '重新核验' }}
-    </button>
-  </main>
+  <el-result
+    class="system-result"
+    icon="info"
+    title="暂时无法核验登录状态"
+    :sub-title="auth.sessionValidationMessage || '服务端暂时不可达，请检查网络后重试。'"
+  >
+    <template #extra>
+      <p>为保护工厂数据，核验完成前不会开放业务页面，也不会把网络故障误判为凭证失效。</p>
+      <el-button type="primary" :loading="retrying" @click="retry">
+        {{ retrying ? '正在重新核验…' : '重新核验' }}
+      </el-button>
+    </template>
+  </el-result>
 </template>

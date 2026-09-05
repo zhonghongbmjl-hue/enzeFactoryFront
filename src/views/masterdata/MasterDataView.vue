@@ -1,9 +1,13 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { storeToRefs } from 'pinia'
 import { ElMessage } from 'element-plus'
 import { masterDataApi } from '@/api/masterdata'
-import { ApiClientError } from '@/api/http'
 import { useAuthStore } from '@/stores/auth'
+import { useMasterDataStore } from '@/stores/masterdata'
+import { emptyFailure, toFailure } from '@/stores/failure'
+import ResponsiveFilterBar from '@/components/layout/ResponsiveFilterBar.vue'
+import SelectField from '@/components/form/SelectField.vue'
 import type {
   MasterDataInput,
   MasterDataOption,
@@ -31,15 +35,10 @@ const categories: readonly CategoryConfig[] = [
   { type: 'materials', label: '物料', parent: 'units-of-measure', parentLabel: '计量单位' },
 ] as const
 
-const activeType = ref<MasterDataType>('organizations')
-const rows = ref<MasterDataRecord[]>([])
-const loading = ref(false)
-const total = ref(0)
-const page = ref(1)
-const size = ref(20)
-const query = ref('')
-const active = ref<string>('true')
-const failure = reactive({ message: '', traceId: '' })
+const masterdata = useMasterDataStore()
+const { activeType, rows, loading, total, page, size, query, active, failure } =
+  storeToRefs(masterdata)
+const filtersOpen = ref(false)
 const drawer = ref(false)
 const editingId = ref('')
 const parentOptions = ref<MasterDataOption[]>([])
@@ -47,42 +46,41 @@ const organizationOptions = ref<MasterDataOption[]>([])
 const factoryOptions = ref<MasterDataOption[]>([])
 const form = reactive<MasterDataInput>({ code: '', name: '' })
 const auth = useAuthStore()
-let listRequestGeneration = 0
 let factoryRequestGeneration = 0
 
 const current = computed(() => categories.find((item) => item.type === activeType.value)!)
 const canManage = computed(() => auth.permissions.has('MASTERDATA_MANAGE'))
+const organizationSelectOptions = computed(() =>
+  organizationOptions.value.map((item) => ({
+    label: `${item.code} · ${item.name}`,
+    value: item.id,
+  })),
+)
+const factorySelectOptions = computed(() =>
+  factoryOptions.value.map((item) => ({
+    label: `${item.code} · ${item.name}`,
+    value: item.id,
+  })),
+)
+const parentSelectOptions = computed(() =>
+  parentOptions.value.map((item) => ({
+    label: `${item.code} · ${item.name}`,
+    value: item.id,
+  })),
+)
+const materialTypeOptions = [
+  { label: '面料', value: 'FABRIC' },
+  { label: '辅料', value: 'ACCESSORY' },
+  { label: '包装', value: 'PACKAGING' },
+  { label: '其他', value: 'OTHER' },
+]
 
 function resetFailure(): void {
-  failure.message = ''
-  failure.traceId = ''
+  failure.value = emptyFailure()
 }
 
-async function load(): Promise<void> {
-  const generation = ++listRequestGeneration
-  const requestedType = activeType.value
-  loading.value = true
-  resetFailure()
-  try {
-    const params = {
-      page: page.value - 1,
-      size: size.value,
-      sort: 'code,asc',
-      ...(active.value === '' ? {} : { active: active.value === 'true' }),
-      ...(query.value ? { query: query.value } : {}),
-    }
-    const result = await masterDataApi.list(requestedType, params)
-    if (generation !== listRequestGeneration || activeType.value !== requestedType) return
-    rows.value = result.content
-    total.value = result.totalElements
-  } catch (error) {
-    if (generation !== listRequestGeneration || activeType.value !== requestedType) return
-    const candidate = error as Partial<ApiClientError>
-    failure.message = candidate.message || '基础资料加载失败'
-    failure.traceId = candidate.traceId || ''
-  } finally {
-    if (generation === listRequestGeneration) loading.value = false
-  }
+function load(): Promise<void> {
+  return masterdata.load()
 }
 
 async function loadParents(search = ''): Promise<void> {
@@ -116,16 +114,8 @@ async function loadFactoriesForOrganization(
     }
   } catch (error) {
     if (generation !== factoryRequestGeneration || form.organizationId !== organizationId) return
-    const candidate = error as Partial<ApiClientError>
-    failure.message = candidate.message || '工厂选项加载失败'
-    failure.traceId = candidate.traceId || ''
+    failure.value = toFailure(error, '工厂选项加载失败')
   }
-}
-
-async function changeCategory(type: MasterDataType): Promise<void> {
-  activeType.value = type
-  page.value = 1
-  await load()
 }
 
 function clearForm(): void {
@@ -209,9 +199,7 @@ async function save(): Promise<void> {
     ElMessage.success(editingId.value ? '基础资料已更新' : '基础资料已创建')
     await load()
   } catch (error) {
-    const candidate = error as Partial<ApiClientError>
-    failure.message = candidate.message || '保存失败，请检查字段'
-    failure.traceId = candidate.traceId || ''
+    failure.value = toFailure(error, '保存失败，请检查字段')
   }
 }
 
@@ -224,16 +212,28 @@ async function toggle(row: MasterDataRecord): Promise<void> {
     await masterDataApi.setStatus(activeType.value, row, !row.active)
     await load()
   } catch (error) {
-    const candidate = error as Partial<ApiClientError>
-    failure.message = candidate.message || '状态更新失败'
-    failure.traceId = candidate.traceId || ''
+    failure.value = toFailure(error, '状态更新失败')
   }
 }
 
-watch([active, size], () => {
+function asRecord(row: unknown): MasterDataRecord {
+  return row as MasterDataRecord
+}
+
+watch(active, () => {
   page.value = 1
   void load()
 })
+
+function onSizeChange(): void {
+  page.value = 1
+  void load()
+}
+
+function onCategory(type: MasterDataType): Promise<void> {
+  return masterdata.selectType(type)
+}
+
 onMounted(load)
 defineExpose({ openCreate, openEdit, save, toggle })
 </script>
@@ -246,87 +246,113 @@ defineExpose({ openCreate, openEdit, save, toggle })
         <h1>组织与基础资料</h1>
         <p>按租户维护生产层级、往来单位与物料档案。</p>
       </div>
-      <button
-        v-if="canManage"
-        class="primary-action compact"
-        type="button"
-        aria-label="新建基础资料"
-        @click="openCreate"
-      >
-        <span>新建{{ current.label }}</span
-        ><b>＋</b>
-      </button>
+      <el-button v-if="canManage" type="primary" aria-label="新建基础资料" @click="openCreate">
+        新建{{ current.label }}
+      </el-button>
     </header>
 
     <div class="pattern-tabs" role="tablist" aria-label="基础资料分类">
-      <button
+      <el-button
         v-for="item in categories"
         :key="item.type"
-        type="button"
         role="tab"
         :aria-selected="item.type === activeType"
-        :class="{ active: item.type === activeType }"
-        @click="changeCategory(item.type)"
+        :type="item.type === activeType ? 'primary' : 'default'"
+        @click="onCategory(item.type)"
       >
         {{ item.label }}
-      </button>
+      </el-button>
     </div>
 
-    <div class="master-toolbar">
-      <label
-        >检索<input v-model="query" maxlength="120" placeholder="编码 / 名称" @keyup.enter="load"
-      /></label>
-      <label
-        >状态
-        <select v-model="active" aria-label="状态筛选">
-          <option value="">全部</option>
-          <option value="true">启用</option>
-          <option value="false">停用</option>
-        </select>
-      </label>
-      <button class="outline-action" type="button" @click="load">查询</button>
-    </div>
+    <ResponsiveFilterBar v-model="filtersOpen" form-id="master-data-filters" @submit="load">
+      <el-form-item label="关键词">
+        <el-input
+          v-model="query"
+          clearable
+          maxlength="120"
+          placeholder="编码 / 名称"
+          @keyup.enter="load"
+        />
+      </el-form-item>
+      <el-form-item label="状态">
+        <el-radio-group v-model="active" aria-label="状态筛选">
+          <el-radio-button value="all">全部</el-radio-button>
+          <el-radio-button value="enabled">启用</el-radio-button>
+          <el-radio-button value="disabled">停用</el-radio-button>
+        </el-radio-group>
+      </el-form-item>
+      <template #actions>
+        <el-button native-type="submit">查询</el-button>
+      </template>
+    </ResponsiveFilterBar>
 
-    <div v-if="failure.message" class="master-error" role="alert">
-      <b>{{ failure.message }}</b
-      ><span v-if="failure.traceId">追踪号 {{ failure.traceId }}</span>
-    </div>
+    <el-alert
+      v-if="failure.message"
+      :title="failure.message"
+      type="error"
+      :closable="false"
+      show-icon
+      role="alert"
+    >
+      <span v-if="failure.traceId">追踪号 {{ failure.traceId }}</span>
+    </el-alert>
 
-    <div class="master-table-wrap" :aria-busy="loading">
-      <table class="master-table">
-        <thead>
-          <tr>
-            <th>编码</th>
-            <th>名称</th>
-            <th>状态</th>
-            <th>更新时间</th>
-            <th v-if="canManage">操作</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="row in rows" :key="row.id">
-            <td>
-              <code>{{ row.code }}</code>
-            </td>
-            <td>{{ row.name }}</td>
-            <td>
-              <span class="state-chip" :class="{ off: !row.active }">{{
-                row.active ? '启用' : '停用'
-              }}</span>
-            </td>
-            <td>{{ new Date(row.updatedAt).toLocaleString('zh-CN') }}</td>
-            <td v-if="canManage">
-              <button type="button" class="table-action" @click="openEdit(row)">编辑</button>
-              <button type="button" class="table-action" @click="toggle(row)">
-                {{ row.active ? '停用' : '启用' }}
-              </button>
-            </td>
-          </tr>
-          <tr v-if="!loading && rows.length === 0">
-            <td :colspan="canManage ? 5 : 4" class="empty-cell">暂无{{ current.label }}资料</td>
-          </tr>
-        </tbody>
-      </table>
+    <div class="master-table-wrap desktop-record-table" :aria-busy="loading">
+      <el-table v-loading="loading" :data="rows" empty-text="暂无资料">
+        <el-table-column label="编码" min-width="120">
+          <template #default="{ row }">
+            <code>{{ row.code }}</code>
+          </template>
+        </el-table-column>
+        <el-table-column prop="name" label="名称" min-width="160" />
+        <el-table-column label="状态" width="100">
+          <template #default="{ row }">
+            <el-tag :type="row.active ? 'success' : 'info'" size="small">
+              {{ row.active ? '启用' : '停用' }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="更新时间" min-width="180">
+          <template #default="{ row }">
+            {{ new Date(row.updatedAt).toLocaleString('zh-CN') }}
+          </template>
+        </el-table-column>
+        <el-table-column v-if="canManage" label="操作" width="160" fixed="right">
+          <template #default="{ row }">
+            <el-button link type="primary" @click="openEdit(asRecord(row))">编辑</el-button>
+            <el-button link type="primary" @click="toggle(asRecord(row))">
+              {{ asRecord(row).active ? '停用' : '启用' }}
+            </el-button>
+          </template>
+        </el-table-column>
+        <template #empty>暂无{{ current.label }}资料</template>
+      </el-table>
+    </div>
+    <div v-if="rows.length" class="mobile-record-list" :aria-busy="loading">
+      <article v-for="row in rows" :key="row.id" class="mobile-record-card">
+        <header>
+          <div>
+            <code>{{ row.code }}</code
+            ><small>{{ current.label }}</small>
+          </div>
+          <el-tag :type="row.active ? 'success' : 'info'" size="small">
+            {{ row.active ? '启用' : '停用' }}
+          </el-tag>
+        </header>
+        <h2>{{ row.name }}</h2>
+        <dl>
+          <div>
+            <dt>更新时间</dt>
+            <dd>{{ new Date(row.updatedAt).toLocaleString('zh-CN') }}</dd>
+          </div>
+        </dl>
+        <footer v-if="canManage">
+          <el-button link type="primary" @click="openEdit(row)">编辑</el-button>
+          <el-button link type="primary" @click="toggle(row)">
+            {{ row.active ? '停用' : '启用' }}
+          </el-button>
+        </footer>
+      </article>
     </div>
 
     <footer class="pager">
@@ -338,99 +364,118 @@ defineExpose({ openCreate, openEdit, save, toggle })
         :page-sizes="[10, 20, 50, 100]"
         layout="prev, pager, next, sizes"
         @current-change="load"
+        @size-change="onSizeChange"
       />
     </footer>
 
     <el-drawer
       v-model="drawer"
       :title="`${editingId ? '编辑' : '新建'}${current.label}`"
-      size="min(520px, 94vw)"
+      size="min(480px, 94vw)"
     >
-      <form class="master-form" @submit.prevent="save">
-        <label for="md-code">编码</label
-        ><input
-          id="md-code"
-          v-model="form.code"
-          required
-          maxlength="40"
-          pattern="[A-Za-z0-9][A-Za-z0-9_-]{0,39}"
-        />
-        <label for="md-name">名称</label
-        ><input id="md-name" v-model="form.name" required maxlength="120" />
+      <el-form class="master-form" label-position="top" @submit.prevent="save">
+        <el-form-item label="编码">
+          <el-input
+            id="md-code"
+            v-model="form.code"
+            maxlength="40"
+            pattern="[A-Za-z0-9][A-Za-z0-9_-]{0,39}"
+          />
+        </el-form-item>
+        <el-form-item label="名称">
+          <el-input id="md-name" v-model="form.name" maxlength="120" />
+        </el-form-item>
         <template v-if="activeType === 'warehouses'">
-          <label for="md-organization">所属组织</label>
-          <select
-            id="md-organization"
-            v-model="form.organizationId"
-            required
-            @change="onWarehouseOrganizationChange"
-          >
-            <option value="" disabled>请选择启用组织</option>
-            <option v-for="item in organizationOptions" :key="item.id" :value="item.id">
-              {{ item.code }} · {{ item.name }}
-            </option>
-          </select>
-          <label for="md-factory">所属工厂（可选）</label>
-          <select id="md-factory" v-model="form.factoryId" :disabled="!form.organizationId">
-            <option value="">不限定工厂</option>
-            <option v-for="item in factoryOptions" :key="item.id" :value="item.id">
-              {{ item.code }} · {{ item.name }}
-            </option>
-          </select>
+          <el-form-item label="所属组织">
+            <SelectField
+              id="md-organization"
+              :model-value="form.organizationId ?? ''"
+              placeholder="请选择启用组织"
+              aria-required="true"
+              :options="organizationSelectOptions"
+              @update:model-value="form.organizationId = String($event)"
+              @change="onWarehouseOrganizationChange"
+            />
+          </el-form-item>
+          <el-form-item label="所属工厂（可选）">
+            <SelectField
+              id="md-factory"
+              :model-value="form.factoryId ?? ''"
+              clearable
+              placeholder="不限定工厂"
+              :disabled="!form.organizationId"
+              :options="factorySelectOptions"
+              @update:model-value="form.factoryId = String($event ?? '')"
+            />
+          </el-form-item>
         </template>
         <template v-if="current.parent">
-          <label for="md-parent">{{ current.parentLabel }}</label>
-          <select id="md-parent" v-model="form.parentId" required>
-            <option value="" disabled>请选择启用项</option>
-            <option v-for="item in parentOptions" :key="item.id" :value="item.id">
-              {{ item.code }} · {{ item.name }}
-            </option>
-          </select>
+          <el-form-item :label="current.parentLabel ?? '上级'">
+            <SelectField
+              id="md-parent"
+              :model-value="form.parentId ?? ''"
+              placeholder="请选择启用项"
+              aria-required="true"
+              :options="parentSelectOptions"
+              @update:model-value="form.parentId = String($event)"
+            />
+          </el-form-item>
         </template>
         <template v-if="activeType === 'units-of-measure'">
-          <label for="md-symbol">符号</label
-          ><input id="md-symbol" v-model="form.symbol" required maxlength="16" />
-          <label for="md-category">类别</label
-          ><input id="md-category" v-model="form.category" required maxlength="32" />
-          <label for="md-scale">小数位</label
-          ><input
-            id="md-scale"
-            v-model.number="form.decimalScale"
-            type="number"
-            min="0"
-            max="6"
-            required
-          />
+          <el-form-item label="符号">
+            <el-input id="md-symbol" v-model="form.symbol" maxlength="16" />
+          </el-form-item>
+          <el-form-item label="类别">
+            <el-input id="md-category" v-model="form.category" maxlength="32" />
+          </el-form-item>
+          <el-form-item label="小数位">
+            <el-input
+              id="md-scale"
+              v-model.number="form.decimalScale"
+              type="number"
+              min="0"
+              max="6"
+            />
+          </el-form-item>
         </template>
         <template v-if="activeType === 'materials'">
-          <label for="md-material-type">物料类型</label>
-          <select id="md-material-type" v-model="form.materialType" required>
-            <option value="FABRIC">面料</option>
-            <option value="ACCESSORY">辅料</option>
-            <option value="PACKAGING">包装</option>
-            <option value="OTHER">其他</option>
-          </select>
-          <label for="md-spec">规格</label
-          ><input id="md-spec" v-model="form.specification" maxlength="160" />
-          <label for="md-color">颜色 / 色号</label
-          ><input id="md-color" v-model="form.color" maxlength="80" /><input
-            v-model="form.colorCode"
-            aria-label="色号"
-            maxlength="40"
-          />
+          <el-form-item label="物料类型">
+            <SelectField
+              id="md-material-type"
+              :model-value="form.materialType ?? ''"
+              aria-required="true"
+              :options="materialTypeOptions"
+              @update:model-value="
+                form.materialType = String($event) as MasterDataInput['materialType']
+              "
+            />
+          </el-form-item>
+          <el-form-item label="规格">
+            <el-input id="md-spec" v-model="form.specification" maxlength="160" />
+          </el-form-item>
+          <el-form-item label="颜色 / 色号">
+            <el-space>
+              <el-input id="md-color" v-model="form.color" maxlength="80" />
+              <el-input v-model="form.colorCode" aria-label="色号" maxlength="40" />
+            </el-space>
+          </el-form-item>
         </template>
         <template v-if="activeType === 'customers' || activeType === 'suppliers'">
-          <label for="md-contact">联系人</label
-          ><input id="md-contact" v-model="form.contactName" maxlength="80" />
-          <label for="md-phone">电话</label
-          ><input id="md-phone" v-model="form.phone" maxlength="32" />
-          <label for="md-email">邮箱</label
-          ><input id="md-email" v-model="form.email" type="email" maxlength="160" />
-          <label for="md-address">地址</label
-          ><input id="md-address" v-model="form.address" maxlength="300" />
+          <el-form-item label="联系人">
+            <el-input id="md-contact" v-model="form.contactName" maxlength="80" />
+          </el-form-item>
+          <el-form-item label="电话">
+            <el-input id="md-phone" v-model="form.phone" maxlength="32" />
+          </el-form-item>
+          <el-form-item label="邮箱">
+            <el-input id="md-email" v-model="form.email" type="email" maxlength="160" />
+          </el-form-item>
+          <el-form-item class="field-wide" label="地址">
+            <el-input id="md-address" v-model="form.address" maxlength="300" />
+          </el-form-item>
         </template>
-        <button class="primary-action" type="submit"><span>保存资料</span><b>→</b></button>
-      </form>
+        <el-button type="primary" native-type="submit">保存资料</el-button>
+      </el-form>
     </el-drawer>
   </section>
 </template>

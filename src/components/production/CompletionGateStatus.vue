@@ -127,15 +127,19 @@ defineExpose({ refresh: loadInspection })
     <form data-testid="completion-form" @submit.prevent="complete">
       <label>
         起始良品量（含）
-        <input v-model="form.startQuantity" name="startQuantity" inputmode="decimal" required />
+        <el-input v-model="form.startQuantity" name="startQuantity" inputmode="decimal" />
       </label>
       <label>
         结束良品量（不含）
-        <input v-model="form.endQuantity" name="endQuantity" inputmode="decimal" required />
+        <el-input v-model="form.endQuantity" name="endQuantity" inputmode="decimal" />
       </label>
-      <button type="submit" :disabled="pending || loading || reasons.length > 0">
+      <el-button
+        type="primary"
+        native-type="submit"
+        :disabled="pending || loading || reasons.length > 0"
+      >
         {{ pending ? '正在复验精确证据版本…' : '锁定范围并登记完工' }}
-      </button>
+      </el-button>
     </form>
     <p v-if="message" class="success">{{ message }}</p>
     <p v-if="errorMessage" class="error">{{ errorMessage }}</p>
@@ -204,25 +208,6 @@ label {
   gap: 5px;
   font-size: 12px;
   font-weight: 750;
-}
-input {
-  padding: 10px;
-  border: 1px solid #a9bcb7;
-  border-radius: 8px;
-  font-family: 'Cascadia Mono', monospace;
-}
-button {
-  border: 0;
-  border-radius: 9px;
-  padding: 11px 16px;
-  background: #d7a94d;
-  color: #183236;
-  font-weight: 850;
-  cursor: pointer;
-}
-button:disabled {
-  cursor: not-allowed;
-  opacity: 0.55;
 }
 .reasons,
 .error {

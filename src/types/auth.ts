@@ -20,11 +20,5 @@ export interface UserProfile {
   permissions: string[]
 }
 
-export interface ApiResponse<T> {
-  success: boolean
-  code: string
-  message: string
-  data: T
-  traceId: string
-  timestamp: string
-}
+// 保留旧导入路径，业务代码应优先从 @/types/api 导入。
+export type { ApiResponse } from './api'

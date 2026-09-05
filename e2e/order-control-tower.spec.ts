@@ -135,7 +135,7 @@ test('real API control tower renders delivery risk and paginates tenant-scoped o
   let visiblePage = 0
   for (const [targetPage, orders] of [...currentRunByPage.entries()].sort(([a], [b]) => a - b)) {
     while (visiblePage < targetPage) {
-      await page.getByTestId('next-page').click()
+      await page.getByRole('button', { name: '下一页' }).click()
       visiblePage += 1
       await expect(page.getByText(`第 ${visiblePage + 1} / ${uiTotalPages} 页`)).toBeVisible()
     }

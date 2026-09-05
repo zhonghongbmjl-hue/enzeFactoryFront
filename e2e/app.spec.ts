@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
 
 test('anonymous operator sees the factory login surface', async ({ page }) => {
   await page.goto('/')
@@ -14,6 +14,96 @@ test('login surface does not overflow a narrow viewport', async ({ page }) => {
   const viewport = page.viewportSize()
   expect(width).toBeLessThanOrEqual(viewport?.width ?? width)
 })
+
+test('login shell stays within every supported layout breakpoint', async ({ page }) => {
+  for (const width of [320, 375, 768, 1024, 1440]) {
+    await page.setViewportSize({ width, height: width < 768 ? 812 : 900 })
+    await page.goto('/login')
+    await expect(page.getByRole('heading', { name: '登录控制台' })).toBeVisible()
+    const layout = await page.evaluate(() => {
+      const button = document.querySelector<HTMLButtonElement>('.login-submit')
+      return {
+        documentWidth: document.documentElement.scrollWidth,
+        viewportWidth: window.innerWidth,
+        buttonHeight: button?.getBoundingClientRect().height ?? 0,
+      }
+    })
+    expect(layout.documentWidth).toBeLessThanOrEqual(layout.viewportWidth)
+    expect(layout.buttonHeight).toBeGreaterThanOrEqual(width < 768 ? 44 : 40)
+  }
+})
+
+test('every primary business route renders without whole-page overflow', async ({ page }) => {
+  await installFullPermissionSession(page)
+  const routes = [
+    ['/', '订单履约控制塔'],
+    ['/master-data', '组织与基础资料'],
+    ['/products', '产品纸样台账'],
+    ['/orders', '订单履约台账'],
+    ['/inventory', '库存与领退料'],
+    ['/cutting-kitting', '裁剪与齐套'],
+    ['/production', '生产排产驾驶舱'],
+    ['/work-orders', '生产工单'],
+    ['/quality', '品质工作台'],
+    ['/after-sales', '全租户售后待办'],
+  ] as const
+
+  for (const [path, heading] of routes) {
+    await page.goto(path)
+    await expect(page.getByRole('heading', { name: heading })).toBeVisible()
+    const layout = await page.evaluate(() => ({
+      documentWidth: document.documentElement.scrollWidth,
+      viewportWidth: window.innerWidth,
+    }))
+    expect(layout.documentWidth, `${path} 不应产生整页横向滚动`).toBeLessThanOrEqual(
+      layout.viewportWidth,
+    )
+  }
+})
+
+async function installFullPermissionSession(page: Page) {
+  const profile = {
+    userId: 'a8e88635-c2db-48ce-a384-fec40cd75cb4',
+    username: 'admin',
+    displayName: '生产主管',
+    tenantId: '7e179539-02b7-4190-bcad-83edcbb66a81',
+    tenantCode: 'needle-one',
+    roles: ['ADMIN'],
+    permissions: [
+      'ORDER_VIEW',
+      'MASTERDATA_VIEW',
+      'PRODUCT_VIEW',
+      'PRODUCTION_MANAGE',
+      'INVENTORY_MANAGE',
+      'QUALITY_INSPECT',
+      'AFTER_SALES_MANAGE',
+      'SHIPMENT_VIEW',
+      'PROCUREMENT_VIEW',
+    ],
+  }
+  await page.addInitScript((restoredProfile) => {
+    sessionStorage.setItem(
+      'garment.auth',
+      JSON.stringify({
+        schemaVersion: 1,
+        token: 'signed.jwt',
+        expiresAt: '2099-08-23T12:00:00Z',
+        profile: restoredProfile,
+        authGeneration: 1,
+      }),
+    )
+  }, profile)
+  await page.route('**/api/v1/**', (route) => {
+    const data = new URL(route.request().url()).pathname.endsWith('/auth/me')
+      ? profile
+      : { content: [], page: 0, number: 0, size: 20, totalElements: 0, totalPages: 0 }
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ success: true, data }),
+    })
+  })
+}
 
 test('logging directly into another tenant clears the unverified prior tenant cache', async ({
   page,
@@ -163,14 +253,19 @@ test('narrow navigation keeps meaningful visible and accessible labels', async (
 
   await page.goto('/')
 
-  const overview = page.getByRole('link', { name: '履约总览', exact: true })
-  const workOrders = page.getByRole('link', { name: '生产排产', exact: true })
+  const navigationTrigger = page.getByRole('button', { name: '打开主导航' })
+  await expect(navigationTrigger).toBeVisible()
+  await navigationTrigger.click()
+  const overview = page.getByRole('menuitem', { name: '履约总览', exact: true })
+  const planning = page.getByRole('menuitem', { name: '生产排产', exact: true })
+  const mobileNavigation = page.getByRole('navigation', { name: '移动主导航' })
   await expect(overview).toBeVisible()
-  await expect(workOrders).toBeVisible()
-  await expect(overview.locator('.nav-short')).toHaveText('总览')
-  await expect(overview.locator('.nav-short')).toBeVisible()
-  await expect(workOrders.locator('.nav-short')).toHaveText('排产')
-  await expect(workOrders.locator('.nav-short')).toBeVisible()
+  await expect(planning).toBeVisible()
+  await expect(mobileNavigation.getByText('总览', { exact: true })).toBeVisible()
+  await expect(mobileNavigation.getByText('生产', { exact: true })).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(mobileNavigation).toBeHidden()
+  await expect(navigationTrigger).toBeFocused()
   const width = await page.evaluate(() => document.documentElement.scrollWidth)
   expect(width).toBeLessThanOrEqual(page.viewportSize()?.width ?? width)
 })
