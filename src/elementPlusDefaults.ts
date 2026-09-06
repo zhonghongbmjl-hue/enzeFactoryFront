@@ -8,6 +8,6 @@ function enableClearableByDefault(component: PropHost): void {
 }
 
 export function applyElementPlusClearableDefaults(): void {
-  enableClearableByDefault(ElInput)
-  enableClearableByDefault(ElSelect)
+  enableClearableByDefault(ElInput as unknown as PropHost)
+  enableClearableByDefault(ElSelect as unknown as PropHost)
 }

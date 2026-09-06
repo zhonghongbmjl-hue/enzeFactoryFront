@@ -6,6 +6,7 @@ import { procurementApi } from '@/api/procurement'
 import { useAuthStore } from '@/stores/auth'
 import type { MaterialBranch, ProcurementWorkspace, PurchasePlan } from '@/types/procurement'
 import { PLAN_STATUS_LABELS } from '@/types/procurement'
+import ProcurementFlowDrawer from './ProcurementFlowDrawer.vue'
 
 const route = useRoute()
 const auth = useAuthStore()
@@ -45,6 +46,14 @@ function stageIndex(plan: PurchasePlan): number {
     return 4
   })
   return itemStages.length ? Math.min(...itemStages) : 1
+}
+
+function canCompletePlan(plan: PurchasePlan): boolean {
+  return (
+    plan.status === 'ORDERED' &&
+    plan.items.length > 0 &&
+    plan.items.every((item) => item.putAwayQuantity >= item.plannedQuantity)
+  )
 }
 
 function report(error: unknown, fallback: string): void {
@@ -213,8 +222,14 @@ onMounted(load)
           >
             审核采购计划
           </el-button>
+          <ProcurementFlowDrawer
+            :plan="plan"
+            :can-manage="canManage"
+            :can-approve="canApprove"
+            @changed="load"
+          />
           <el-button
-            v-if="canManage && plan.status === 'ORDERED'"
+            v-if="canManage && canCompletePlan(plan)"
             :data-testid="`complete-${plan.materialType.toLowerCase()}-plan`"
             type="primary"
             :disabled="!!pending"

@@ -37,6 +37,9 @@ export function createProcurementApi(client: AxiosInstance) {
     }): Promise<PurchaseOrder> {
       return post('/purchase-orders', input)
     },
+    async getPurchaseOrder(id: string): Promise<PurchaseOrder> {
+      return request.get<PurchaseOrder>(`/purchase-orders/${id}`)
+    },
     async purchaseOrderAction(
       id: string,
       action: PurchaseOrderAction,
@@ -63,6 +66,9 @@ export function createProcurementApi(client: AxiosInstance) {
       }>
     }): Promise<IncomingInspection> {
       return post('/incoming-inspections', input)
+    },
+    async getInspection(id: string): Promise<IncomingInspection> {
+      return request.get<IncomingInspection>(`/incoming-inspections/${id}`)
     },
     async inspectionAction(
       id: string,

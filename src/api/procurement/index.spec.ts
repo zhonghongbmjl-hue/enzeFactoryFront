@@ -16,6 +16,12 @@ describe('procurement api', () => {
     await api.workspace('order-id')
     expect(get).toHaveBeenCalledWith('/procurement/orders/order-id')
 
+    await api.getPurchaseOrder('po-id')
+    expect(get).toHaveBeenCalledWith('/purchase-orders/po-id')
+
+    await api.getInspection('inspection-id')
+    expect(get).toHaveBeenCalledWith('/incoming-inspections/inspection-id')
+
     await api.planAction('plan-id', 'submit', 1)
     expect(post).toHaveBeenCalledWith(
       '/purchase-plans/plan-id/submit',
