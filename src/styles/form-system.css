@@ -67,6 +67,11 @@
     0 0 0 3px var(--field-focus-ring) !important;
 }
 
+.el-input__clear,
+.el-select__clear {
+  color: var(--text-note-on-fabric);
+}
+
 /* Reset legacy page selectors that accidentally style Element Plus' inner native control. */
 .el-input__inner,
 .el-select__input,

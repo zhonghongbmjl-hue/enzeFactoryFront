@@ -3,6 +3,7 @@ import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 const css = readFileSync(resolve(process.cwd(), 'src/styles/main.css'), 'utf8')
+const layoutCss = readFileSync(resolve(process.cwd(), 'src/styles/layout-system.css'), 'utf8')
 
 function token(name: string): string {
   const match = css.match(new RegExp(`--${name}:\\s*(#[0-9a-fA-F]{6})`))
@@ -38,5 +39,9 @@ describe('small text contrast tokens', () => {
     ['text-accent-on-fabric', 'fabric-50'],
   ])('%s is WCAG AA on %s', (foreground, background) => {
     expect(contrast(token(foreground), token(background))).toBeGreaterThanOrEqual(4.5)
+  })
+
+  it('does not restyle header actions by coloring every span', () => {
+    expect(layoutCss).not.toMatch(/header:first-child :is\(h1, h2, p, span\)/)
   })
 })

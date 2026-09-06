@@ -27,7 +27,7 @@ export const useProductListStore = defineStore('products', {
           size: this.size,
           sort: 'styleNo,asc',
           ...(this.query ? { query: this.query } : {}),
-          ...(this.status !== 'ALL' ? { status: this.status } : {}),
+          ...(this.status && this.status !== 'ALL' ? { status: this.status } : {}),
         })
         if (generation !== this.requestGeneration) return
         this.rows = result.content

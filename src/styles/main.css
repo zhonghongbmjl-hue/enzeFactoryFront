@@ -988,15 +988,20 @@ input:focus-visible {
   margin-top: 0;
 }
 
-.order-register-stamp {
-  padding: 11px 14px;
-  color: var(--fabric-50);
-  background: var(--ink-900);
-  border-bottom: 4px solid var(--orange-500);
-  font:
-    700 11px Consolas,
-    monospace;
-  letter-spacing: 0.14em;
+.order-line-draft {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--line);
+}
+.order-line-draft header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--text-label-on-fabric);
+  font-size: 12px;
+  font-weight: 700;
 }
 .order-ledger {
   overflow-x: auto;

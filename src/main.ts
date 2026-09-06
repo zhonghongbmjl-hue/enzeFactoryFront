@@ -8,8 +8,11 @@ import { useAuthStore } from './stores/auth'
 import './stores'
 import { configureAuthRuntime } from './api/http'
 import { createUnauthorizedHandler } from './authBoundary'
+import { applyElementPlusClearableDefaults } from './elementPlusDefaults'
 import './styles/main.css'
 import './styles/form-system.css'
+
+applyElementPlusClearableDefaults()
 
 const app = createApp(App)
 const pinia = createPinia()

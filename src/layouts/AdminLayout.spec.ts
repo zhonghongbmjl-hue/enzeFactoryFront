@@ -6,6 +6,31 @@ import { useAuthStore } from '@/stores/auth'
 import AdminLayout from './AdminLayout.vue'
 
 describe('管理台菜单权限', () => {
+  it('路由切换后将焦点移到原生主内容区域', async () => {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1440 })
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { path: '/', component: { template: '<div>首页</div>' } },
+        { path: '/orders', component: { template: '<div>订单</div>' } },
+      ],
+    })
+    await router.push('/')
+    await router.isReady()
+    const wrapper = mount(AdminLayout, {
+      attachTo: document.body,
+      global: { plugins: [pinia, router] },
+    })
+
+    await router.push('/orders')
+    await wrapper.vm.$nextTick()
+
+    expect(document.activeElement).toBe(wrapper.get('#main-content').element)
+    wrapper.unmount()
+  })
+
   it('仅有售后管理权限时仍显示直属售后待办入口且不显示订单入口', async () => {
     Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1440 })
     const pinia = createPinia()

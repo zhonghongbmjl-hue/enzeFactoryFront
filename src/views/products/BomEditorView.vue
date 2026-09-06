@@ -87,14 +87,10 @@ function addItem(): void {
   const available = materialOptions.value.find(
     (material) => !draftItems.value.some((item) => item.materialId === material.id),
   )
-  if (!available) {
-    ElMessage.warning('没有可继续添加的启用物料')
-    return
-  }
   draftItems.value.push({
-    materialId: available.id,
-    materialCode: available.code,
-    materialName: available.name,
+    materialId: available?.id ?? '',
+    materialCode: available?.code ?? '',
+    materialName: available?.name ?? '',
     usage: 1,
     lossRate: 0,
   })

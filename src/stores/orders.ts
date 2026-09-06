@@ -26,7 +26,7 @@ export const useOrderListStore = defineStore('orders', {
           page: this.page - 1,
           size: this.size,
           ...(this.query.trim() ? { query: this.query.trim() } : {}),
-          ...(this.status !== 'ALL' ? { status: this.status } : {}),
+          ...(this.status && this.status !== 'ALL' ? { status: this.status } : {}),
         })
         if (generation !== this.requestGeneration) return
         this.rows = result.content

@@ -246,6 +246,30 @@ describe('产品与BOM页面权限', () => {
     expect(wrapper.text()).toContain('LATEST')
   })
 
+  it('未检索物料时添加物料仍会插入空行', async () => {
+    permissions(['PRODUCT_VIEW', 'PRODUCT_MANAGE'])
+    vi.mocked(bomApi.get).mockResolvedValueOnce({
+      id: 'draft-bom',
+      productId: 'product-id',
+      versionNo: 'V2',
+      name: '草稿',
+      status: 'DRAFT',
+      version: 0,
+      createdAt: '',
+      updatedAt: '',
+      items: [],
+    })
+    const router = createRouter({ history: createMemoryHistory(), routes: [] })
+    const wrapper = mount(BomEditorView, {
+      props: { bomId: 'draft-bom' },
+      global: { plugins: [router] },
+    })
+    await flushPromises()
+    expect(wrapper.find('[aria-label="单件用量"]').exists()).toBe(false)
+    await wrapper.get('button.table-action').trigger('click')
+    expect(wrapper.find('[aria-label="单件用量"]').exists()).toBe(true)
+  })
+
   it('生命周期动作pending时禁用按钮并忽略双击', async () => {
     permissions(['PRODUCT_VIEW', 'PRODUCT_APPROVE'])
     let resolve!: (value: Awaited<ReturnType<typeof bomApi.approve>>) => void

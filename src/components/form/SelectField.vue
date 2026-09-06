@@ -43,8 +43,10 @@ export default defineComponent({
           name: props.name,
           'data-testid': props.dataTestid,
           modelValue: props.modelValue,
-          'onUpdate:modelValue': (value: SelectFieldValue) => emit('update:modelValue', value),
-          onChange: (value: SelectFieldValue) => emit('change', value),
+          clearable: attrs.clearable !== false,
+          'onUpdate:modelValue': (value: SelectFieldValue) =>
+            emit('update:modelValue', value ?? ''),
+          onChange: (value: SelectFieldValue) => emit('change', value ?? ''),
         },
         () =>
           props.options.map((option) =>

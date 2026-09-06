@@ -14,7 +14,6 @@ const app = useAppStore()
 const { isDesktop, navigationOpen } = storeToRefs(app)
 const route = useRoute()
 const router = useRouter()
-const mainRegion = ref<HTMLElement>()
 const navigationTrigger = ref<HTMLElement>()
 app.syncViewport()
 const initials = computed(() => auth.profile?.displayName.slice(0, 1) || '工')
@@ -48,7 +47,7 @@ watch(
   async () => {
     app.closeNavigation()
     await nextTick()
-    mainRegion.value?.focus({ preventScroll: true })
+    document.getElementById('main-content')?.focus({ preventScroll: true })
   },
 )
 
@@ -121,7 +120,6 @@ onUnmounted(() => window.removeEventListener('resize', syncViewport))
 
       <el-main
         id="main-content"
-        ref="mainRegion"
         tabindex="-1"
         :class="`content-width-${contentWidth}`"
       >

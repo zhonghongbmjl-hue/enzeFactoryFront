@@ -393,7 +393,7 @@ defineExpose({ openCreate, openEdit, save, toggle })
               placeholder="请选择启用组织"
               aria-required="true"
               :options="organizationSelectOptions"
-              @update:model-value="form.organizationId = String($event)"
+              @update:model-value="form.organizationId = String($event ?? '')"
               @change="onWarehouseOrganizationChange"
             />
           </el-form-item>
@@ -417,7 +417,7 @@ defineExpose({ openCreate, openEdit, save, toggle })
               placeholder="请选择启用项"
               aria-required="true"
               :options="parentSelectOptions"
-              @update:model-value="form.parentId = String($event)"
+              @update:model-value="form.parentId = String($event ?? '')"
             />
           </el-form-item>
         </template>
@@ -446,7 +446,7 @@ defineExpose({ openCreate, openEdit, save, toggle })
               aria-required="true"
               :options="materialTypeOptions"
               @update:model-value="
-                form.materialType = String($event) as MasterDataInput['materialType']
+                form.materialType = String($event ?? '') as MasterDataInput['materialType']
               "
             />
           </el-form-item>

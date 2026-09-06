@@ -78,6 +78,7 @@ onMounted(load)
         <SelectField
           v-model="status"
           aria-label="产品状态"
+          placeholder="全部"
           :options="[
             { label: '全部', value: 'ALL' },
             { label: '草稿', value: 'DRAFT' },

@@ -365,7 +365,7 @@ a,
   box-shadow: var(--shadow-1) !important;
 }
 
-.admin-shell .el-main > :is(section, main) > header:first-child :is(h1, h2, p, span) {
+.admin-shell .el-main > :is(section, main) > header:first-child :is(h1, h2, p) {
   color: inherit;
 }
 

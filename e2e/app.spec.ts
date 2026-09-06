@@ -61,7 +61,15 @@ test('every primary business route renders without whole-page overflow', async (
   }
 })
 
-async function installFullPermissionSession(page: Page) {
+test('order ledger shows create order action for managers', async ({ page }) => {
+  await installFullPermissionSession(page, ['ORDER_MANAGE'])
+  await page.goto('/orders')
+  const createOrder = page.getByTestId('create-order')
+  await expect(createOrder).toBeVisible()
+  await expect(createOrder).toHaveText('新建订单')
+})
+
+async function installFullPermissionSession(page: Page, extraPermissions: string[] = []) {
   const profile = {
     userId: 'a8e88635-c2db-48ce-a384-fec40cd75cb4',
     username: 'admin',
@@ -79,6 +87,7 @@ async function installFullPermissionSession(page: Page) {
       'AFTER_SALES_MANAGE',
       'SHIPMENT_VIEW',
       'PROCUREMENT_VIEW',
+      ...extraPermissions,
     ],
   }
   await page.addInitScript((restoredProfile) => {

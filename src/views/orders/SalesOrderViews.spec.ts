@@ -3,6 +3,8 @@ import { createPinia, setActivePinia } from 'pinia'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { salesOrderApi } from '@/api/orders'
+import { masterDataApi } from '@/api/masterdata'
+import { productApi } from '@/api/products'
 import { ApiClientError } from '@/api/http'
 import { useAuthStore } from '@/stores/auth'
 import { clearTenantCaches } from '@/stores/tenantCache'
@@ -22,6 +24,37 @@ vi.mock('@/api/orders', () => ({
     confirmManualDelivery: vi.fn(),
   },
 }))
+
+vi.mock('@/api/masterdata', () => ({
+  masterDataApi: { select: vi.fn().mockResolvedValue([]) },
+}))
+
+vi.mock('@/api/products', () => ({
+  productApi: {
+    list: vi.fn().mockResolvedValue({
+      content: [],
+      totalElements: 0,
+      totalPages: 0,
+      page: 0,
+      size: 50,
+    }),
+    skus: vi.fn().mockResolvedValue([]),
+  },
+}))
+
+const SelectFieldStub = {
+  name: 'SelectField',
+  props: ['modelValue', 'options', 'id', 'name', 'dataTestid', 'disabled'],
+  emits: ['update:modelValue', 'change'],
+  template: `<select
+    :id="id"
+    :name="name"
+    :data-testid="dataTestid"
+    :value="modelValue"
+    :disabled="disabled"
+    @change="$emit('update:modelValue', $event.target.value); $emit('change', $event.target.value)"
+  ><option value=""></option><option v-for="item in options" :key="String(item.value)" :value="item.value">{{ item.label }}</option></select>`,
+}
 
 const order: SalesOrder = {
   id: 'order-id',
@@ -148,6 +181,99 @@ describe('订单页面', () => {
     expect(wrapper.text()).toContain('物料 80%')
     expect(wrapper.text()).toContain('生产 30%')
     expect(wrapper.find('[data-testid="create-order"]').exists()).toBe(false)
+  })
+
+  it('订单管理员可以新建订单草稿并进入详情', async () => {
+    permissions(['ORDER_VIEW', 'ORDER_MANAGE'])
+    vi.mocked(masterDataApi.select).mockResolvedValueOnce([
+      { id: 'customer-id', code: 'VIP-01', name: '华东客户' },
+    ])
+    vi.mocked(productApi.list).mockResolvedValueOnce({
+      content: [
+        {
+          id: 'product-id',
+          styleNo: 'STYLE-01',
+          name: '纸样款',
+          status: 'ACTIVE',
+          version: 1,
+          createdAt: '',
+          updatedAt: '',
+        },
+      ],
+      totalElements: 1,
+      totalPages: 1,
+      page: 0,
+      size: 50,
+    })
+    vi.mocked(productApi.skus).mockResolvedValueOnce([
+      {
+        id: 'sku-id',
+        productId: 'product-id',
+        skuCode: 'STYLE-01-NV-M',
+        color: '藏青',
+        colorCode: 'NV',
+        size: 'M',
+        fit: 'REGULAR',
+        active: true,
+        version: 0,
+        createdAt: '',
+        updatedAt: '',
+      },
+    ])
+    vi.mocked(salesOrderApi.create).mockResolvedValueOnce(order)
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { path: '/orders', name: 'sales-orders', component: SalesOrderListView },
+        { path: '/orders/:id', name: 'sales-order-detail', component: { template: '<div />' } },
+      ],
+    })
+    await router.push('/orders')
+    await router.isReady()
+    const wrapper = mount(SalesOrderListView, {
+      global: {
+        plugins: [router],
+        stubs: {
+          RouterLink: true,
+          teleport: true,
+          SelectField: SelectFieldStub,
+          ElDrawer: {
+            name: 'ElDrawer',
+            props: ['modelValue', 'title', 'size'],
+            template: '<div class="drawer-stub"><slot /></div>',
+          },
+          'el-pagination': true,
+        },
+      },
+    })
+    await flushPromises()
+    expect(wrapper.get('[data-testid="create-order"]').text()).toBe('新建订单')
+    await wrapper.get('[data-testid="create-order"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-testid="order-no"]').setValue('po-20260824-001')
+    await wrapper.get('[data-testid="order-customer"]').setValue('customer-id')
+    await wrapper.get('[data-testid="order-product-0"]').setValue('product-id')
+    await flushPromises()
+    await wrapper.get('[data-testid="order-sku-0"]').setValue('sku-id')
+    await wrapper.get('[data-testid="create-order-form"]').trigger('submit')
+    await flushPromises()
+    expect(salesOrderApi.create).toHaveBeenCalledWith({
+      orderNo: 'PO-20260824-001',
+      customerId: 'customer-id',
+      orderDate: expect.any(String),
+      items: [
+        expect.objectContaining({
+          productId: 'product-id',
+          skuId: 'sku-id',
+          color: '藏青',
+          size: 'M',
+          fit: 'REGULAR',
+          quantity: 1,
+        }),
+      ],
+    })
+    expect(router.currentRoute.value.name).toBe('sales-order-detail')
+    expect(router.currentRoute.value.params.id).toBe('order-id')
   })
 
   it('时间线保留完整生命周期且独立显示当前执行进度', () => {
