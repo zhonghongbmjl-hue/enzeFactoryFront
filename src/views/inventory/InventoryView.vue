@@ -1,13 +1,22 @@
 <script setup lang="ts">
 import SelectField from '@/components/form/SelectField.vue'
-import { ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { inventoryApi } from '@/api/inventory'
+import { masterDataApi } from '@/api/masterdata'
+import { salesOrderApi } from '@/api/orders'
 import { createIdempotencyAttempt } from '@/api/http'
 import type { InventoryBalance, InventoryLedger, MaterialType } from '@/types/inventory'
+import type { MasterDataOption, MasterDataRecord } from '@/types/masterdata'
+import type { SalesOrder } from '@/types/order'
 import { compareDecimal } from '@/utils/decimal'
 
+const CLOSED_ORDER_STATUSES = new Set(['DRAFT', 'CANCELLED', 'COMPLETED'])
+
 const materialQuery = ref('')
+const fabrics = ref<MasterDataRecord[]>([])
+const warehouses = ref<MasterDataOption[]>([])
+const orders = ref<SalesOrder[]>([])
 const balances = ref<InventoryBalance[]>([])
 const ledgers = ref<InventoryLedger[]>([])
 const loading = ref(false)
@@ -23,6 +32,26 @@ const issue = ref({
   batchNo: '',
   quantity: '0',
 })
+const fabricOptions = computed(() =>
+  fabrics.value.map((item) => ({
+    label: item.name,
+    value: item.id,
+  })),
+)
+const warehouseOptions = computed(() =>
+  warehouses.value.map((item) => ({
+    label: `${item.code} · ${item.name}`,
+    value: item.id,
+  })),
+)
+const orderItemOptions = computed(() =>
+  orders.value.flatMap((order) =>
+    order.items.map((item) => ({
+      label: `${order.orderNo} · ${item.color} / ${item.size} / ${item.fit}`,
+      value: item.id,
+    })),
+  ),
+)
 const returned = ref({ returnNo: '', materialIssueId: '', quantity: '0' })
 const issueAttempt = createIdempotencyAttempt()
 const returnAttempt = createIdempotencyAttempt()
@@ -31,6 +60,34 @@ function report(error: unknown, fallback: string): void {
   const candidate = error as { message?: string; traceId?: string }
   failure.value = candidate.message || fallback
   traceId.value = candidate.traceId || ''
+}
+
+function applyMaterialSelection(materialId: string): void {
+  issue.value.materialId = materialId
+  const fabric = fabrics.value.find((item) => item.id === materialId)
+  if (fabric?.materialType === 'FABRIC' || fabric?.materialType === 'ACCESSORY') {
+    issue.value.materialType = fabric.materialType
+  }
+}
+
+async function loadIssueOptions(): Promise<void> {
+  try {
+    const [materialPage, warehouseRows, orderPage] = await Promise.all([
+      masterDataApi.list('materials', {
+        page: 0,
+        size: 100,
+        active: true,
+        sort: 'name,asc',
+      }),
+      masterDataApi.select('warehouses', '', 50),
+      salesOrderApi.list({ page: 0, size: 50 }),
+    ])
+    fabrics.value = materialPage.content.filter((item) => item.materialType === 'FABRIC')
+    warehouses.value = warehouseRows
+    orders.value = orderPage.content.filter((order) => !CLOSED_ORDER_STATUSES.has(order.status))
+  } catch (error) {
+    report(error, '领料选项加载失败')
+  }
 }
 
 async function load(): Promise<void> {
@@ -42,7 +99,13 @@ async function load(): Promise<void> {
       inventoryApi.balances(materialQuery.value.trim()),
       inventoryApi.ledgers(materialQuery.value.trim()),
     ])
-    issue.value.materialId = materialQuery.value.trim()
+    applyMaterialSelection(materialQuery.value.trim())
+    const warehouseIds = [...new Set(balances.value.map((balance) => balance.warehouseId))]
+    if (warehouseIds.length === 1) issue.value.warehouseId = warehouseIds[0]
+    if (balances.value.length === 1) {
+      issue.value.warehouseId = balances.value[0].warehouseId
+      issue.value.batchNo = balances.value[0].batchNo
+    }
   } catch (error) {
     report(error, '库存数据加载失败')
   } finally {
@@ -88,6 +151,13 @@ async function submitReturn(): Promise<void> {
     pending.value = false
   }
 }
+
+watch(materialQuery, (materialId) => {
+  applyMaterialSelection(materialId.trim())
+  issue.value.batchNo = ''
+})
+
+onMounted(loadIssueOptions)
 </script>
 
 <template>
@@ -106,11 +176,14 @@ async function submitReturn(): Promise<void> {
 
     <el-form class="query-strip" @submit.prevent="load">
       <label>
-        <span>物料 ID</span>
-        <el-input
+        <span>面料名称</span>
+        <SelectField
           v-model="materialQuery"
           data-testid="material-query"
-          placeholder="输入物料 UUID"
+          aria-label="面料名称"
+          placeholder="选择面料"
+          filterable
+          :options="fabricOptions"
         />
       </label>
       <el-button data-testid="load-inventory" type="primary" :disabled="loading" @click="load">
@@ -155,7 +228,7 @@ async function submitReturn(): Promise<void> {
         </footer>
       </article>
       <p v-if="!balances.length && !loading" class="empty-note">
-        输入物料 ID，查看跨仓库、跨批次的实时可用量。
+        选择面料名称，查看跨仓库、跨批次的实时可用量。
       </p>
     </div>
 
@@ -170,9 +243,39 @@ async function submitReturn(): Promise<void> {
         </header>
         <div class="field-grid">
           <label><span>领料单号</span><el-input v-model="issue.issueNo" required /></label>
-          <label><span>订单项 ID</span><el-input v-model="issue.orderItemId" required /></label>
-          <label><span>仓库 ID</span><el-input v-model="issue.warehouseId" required /></label>
-          <label><span>物料 ID</span><el-input v-model="issue.materialId" required /></label>
+          <label>
+            <span>订单项</span>
+            <SelectField
+              v-model="issue.orderItemId"
+              data-testid="issue-order-item"
+              aria-label="订单项"
+              placeholder="选择订单项"
+              filterable
+              :options="orderItemOptions"
+            />
+          </label>
+          <label>
+            <span>仓库</span>
+            <SelectField
+              v-model="issue.warehouseId"
+              data-testid="issue-warehouse"
+              aria-label="仓库"
+              placeholder="选择仓库"
+              filterable
+              :options="warehouseOptions"
+            />
+          </label>
+          <label>
+            <span>面料名称</span>
+            <SelectField
+              v-model="materialQuery"
+              data-testid="issue-material"
+              aria-label="领料面料"
+              placeholder="选择面料"
+              filterable
+              :options="fabricOptions"
+            />
+          </label>
           <label
             ><span>物料类型</span>
             <SelectField
@@ -184,7 +287,15 @@ async function submitReturn(): Promise<void> {
               ]"
             />
           </label>
-          <label><span>来源批次</span><el-input v-model="issue.batchNo" /></label>
+          <label>
+            <span>来源批次</span>
+            <el-input
+              v-model="issue.batchNo"
+              data-testid="issue-batch"
+              aria-label="来源批次"
+              placeholder="输入批次号"
+            />
+          </label>
           <label
             ><span>数量</span>
             <el-input
@@ -307,6 +418,7 @@ async function submitReturn(): Promise<void> {
   margin-bottom: 6px;
 }
 .query-strip .el-input,
+.query-strip .el-select,
 .field-grid .el-input,
 .field-grid .el-select {
   width: 100%;

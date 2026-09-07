@@ -171,6 +171,7 @@ function action(wrapper: VueWrapper, label: string) {
 describe('采购与来料办理抽屉', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    sessionStorage.clear()
     vi.mocked(masterDataApi.select).mockImplementation(async (type) =>
       type === 'suppliers'
         ? [{ id: 'supplier-id', code: 'SUP-01', name: '面料供应商' }]
@@ -219,14 +220,14 @@ describe('采购与来料办理抽屉', () => {
 
   it('仅在采购计划已审核且有待采购量时显示办理入口', () => {
     const wrapper = mount(ProcurementFlowDrawer, {
-      props: { plan, canManage: false, canApprove: false },
+      props: { plan, tenantId: 'tenant-id', canManage: false, canApprove: false },
     })
     expect(wrapper.find('[data-testid="open-fabric-procurement-flow"]').exists()).toBe(false)
   })
 
   it('贯通采购单、到货、检验、上架和完成入库接口', async () => {
     const wrapper = mount(ProcurementFlowDrawer, {
-      props: { plan, canManage: true, canApprove: true },
+      props: { plan, tenantId: 'tenant-id', canManage: true, canApprove: true },
       global: {
         stubs: {
           teleport: true,
@@ -234,7 +235,9 @@ describe('采购与来料办理抽屉', () => {
           ElDrawer: {
             name: 'ElDrawer',
             props: ['modelValue', 'title'],
-            template: '<div v-if="modelValue" class="drawer-stub"><slot /></div>',
+            emits: ['update:modelValue'],
+            template:
+              '<div v-if="modelValue" class="drawer-stub"><button data-testid="close-flow" @click="$emit(\'update:modelValue\', false)">关闭</button><slot /></div>',
           },
         },
       },
@@ -258,6 +261,21 @@ describe('采购与来料办理抽屉', () => {
     await flushPromises()
     await action(wrapper, '确认下单').trigger('click')
     await flushPromises()
+
+    await wrapper.setProps({
+      plan: {
+        ...plan,
+        status: 'ORDERED',
+        items: [{ ...plan.items[0]!, orderedQuantity: 10 }],
+      },
+    })
+    await wrapper.get('[data-testid="close-flow"]').trigger('click')
+    expect(wrapper.get('[data-testid="open-fabric-procurement-flow"]').text()).toContain(
+      '继续办理采购与来料',
+    )
+    await wrapper.get('[data-testid="open-fabric-procurement-flow"]').trigger('click')
+    expect(masterDataApi.select).toHaveBeenCalledTimes(2)
+    expect(wrapper.find('[data-testid="create-fabric-receipt-form"]').exists()).toBe(true)
 
     await wrapper.get('[data-testid="receipt-fabric-no"]').setValue('rec-001')
     await wrapper.get('[data-testid="receipt-fabric-batch"]').setValue('lot-001')
@@ -302,6 +320,90 @@ describe('采购与来料办理抽屉', () => {
       'purchase-id',
       'complete',
       4,
+    )
+  })
+
+  it('重新进入工作台后从当前登录会话恢复已下单流程', async () => {
+    sessionStorage.setItem(
+      'garment.tenant.procurement-flow.tenant-id.plan-id',
+      JSON.stringify({
+        schemaVersion: 1,
+        tenantId: 'tenant-id',
+        salesOrderId: 'order-id',
+        planId: 'plan-id',
+        purchaseOrder: { ...purchaseBase, status: 'ORDERED', version: 3 },
+      }),
+    )
+    const orderedPlan: PurchasePlan = {
+      ...plan,
+      status: 'ORDERED',
+      items: [{ ...plan.items[0]!, orderedQuantity: 10 }],
+    }
+    const wrapper = mount(ProcurementFlowDrawer, {
+      props: { plan: orderedPlan, tenantId: 'tenant-id', canManage: true, canApprove: true },
+      global: {
+        stubs: {
+          SelectField: SelectFieldStub,
+          ElDrawer: {
+            name: 'ElDrawer',
+            props: ['modelValue', 'title'],
+            emits: ['update:modelValue'],
+            template: '<div v-if="modelValue" class="drawer-stub"><slot /></div>',
+          },
+        },
+      },
+    })
+
+    expect(wrapper.get('[data-testid="open-fabric-procurement-flow"]').text()).toContain(
+      '继续办理采购与来料',
+    )
+    await wrapper.get('[data-testid="open-fabric-procurement-flow"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="create-fabric-receipt-form"]').exists()).toBe(true)
+  })
+
+  it('历史已下单计划显示继续办理入口并可关联采购单', async () => {
+    const orderedPurchase: PurchaseOrder = {
+      ...purchaseBase,
+      status: 'ORDERED',
+      version: 3,
+    }
+    vi.mocked(procurementApi.getPurchaseOrder).mockResolvedValue(orderedPurchase)
+    const orderedPlan: PurchasePlan = {
+      ...plan,
+      status: 'ORDERED',
+      items: [{ ...plan.items[0]!, orderedQuantity: 10 }],
+    }
+    const wrapper = mount(ProcurementFlowDrawer, {
+      props: { plan: orderedPlan, tenantId: 'tenant-id', canManage: true, canApprove: true },
+      global: {
+        stubs: {
+          SelectField: SelectFieldStub,
+          ElDrawer: {
+            name: 'ElDrawer',
+            props: ['modelValue', 'title'],
+            emits: ['update:modelValue'],
+            template: '<div v-if="modelValue" class="drawer-stub"><slot /></div>',
+          },
+        },
+      },
+    })
+
+    expect(wrapper.get('[data-testid="open-fabric-procurement-flow"]').text()).toContain(
+      '继续办理采购与来料',
+    )
+    await wrapper.get('[data-testid="open-fabric-procurement-flow"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="recover-fabric-purchase-form"]').exists()).toBe(true)
+
+    await wrapper.get('[data-testid="recover-fabric-purchase-id"]').setValue('purchase-id')
+    await wrapper.get('[data-testid="recover-fabric-purchase-form"]').trigger('submit')
+    await flushPromises()
+
+    expect(procurementApi.getPurchaseOrder).toHaveBeenCalledWith('purchase-id')
+    expect(wrapper.find('[data-testid="create-fabric-receipt-form"]').exists()).toBe(true)
+    expect(sessionStorage.getItem('garment.tenant.procurement-flow.tenant-id.plan-id')).toContain(
+      'purchase-id',
     )
   })
 })

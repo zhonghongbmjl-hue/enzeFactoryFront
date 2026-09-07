@@ -15,6 +15,7 @@ import type {
 
 const props = defineProps<{
   plan: PurchasePlan
+  tenantId: string
   canManage: boolean
   canApprove: boolean
 }>()
@@ -54,6 +55,7 @@ const purchaseForm = reactive({ orderNo: '', supplierId: '', lines: [] as Quanti
 const receiptForm = reactive({ receiptNo: '', lines: [] as ReceiptLine[] })
 const inspectionForm = reactive({ inspectionNo: '', lines: [] as InspectionLine[] })
 const putAwayForm = reactive({ putAwayNo: '', warehouseId: '', lines: [] as QuantityLine[] })
+const recoveryForm = reactive({ purchaseOrderId: '' })
 
 const branchKey = computed(() => props.plan.materialType.toLowerCase())
 const branchLabel = computed(() => (props.plan.materialType === 'FABRIC' ? '布料' : '辅料'))
@@ -69,6 +71,100 @@ const canStart = computed(
     ['APPROVED', 'PARTIALLY_ORDERED'].includes(props.plan.status) &&
     props.plan.items.some((item) => item.orderedQuantity < item.plannedQuantity),
 )
+const needsRecovery = computed(
+  () =>
+    !purchaseOrder.value &&
+    props.canManage &&
+    ['ORDERED', 'COMPLETED'].includes(props.plan.status),
+)
+const canOpen = computed(() => canStart.value || needsRecovery.value || Boolean(purchaseOrder.value))
+const openLabel = computed(() => {
+  if (!purchaseOrder.value) {
+    return needsRecovery.value ? '继续办理采购与来料' : '办理采购与来料'
+  }
+  return purchaseOrder.value.status === 'COMPLETED' ? '查看采购与来料' : '继续办理采购与来料'
+})
+
+interface StoredFlow {
+  schemaVersion: 1
+  tenantId: string
+  salesOrderId: string
+  planId: string
+  purchaseOrder: PurchaseOrder
+  receipt?: GoodsReceipt
+  inspection?: IncomingInspection
+  putAway?: PutAwayOrder
+}
+
+function storageKey(): string {
+  return `garment.tenant.procurement-flow.${props.tenantId}.${props.plan.id}`
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function hasEntityShape(value: unknown): boolean {
+  return (
+    isObject(value) &&
+    typeof value.id === 'string' &&
+    typeof value.status === 'string' &&
+    typeof value.version === 'number' &&
+    Array.isArray(value.items)
+  )
+}
+
+function persistFlow(): void {
+  if (!props.tenantId || !purchaseOrder.value) return
+  const stored: StoredFlow = {
+    schemaVersion: 1,
+    tenantId: props.tenantId,
+    salesOrderId: props.plan.salesOrderId,
+    planId: props.plan.id,
+    purchaseOrder: purchaseOrder.value,
+    ...(receipt.value ? { receipt: receipt.value } : {}),
+    ...(inspection.value ? { inspection: inspection.value } : {}),
+    ...(putAway.value ? { putAway: putAway.value } : {}),
+  }
+  sessionStorage.setItem(storageKey(), JSON.stringify(stored))
+}
+
+function restoreFlow(): void {
+  if (!props.tenantId) return
+  try {
+    const raw = sessionStorage.getItem(storageKey())
+    if (!raw) return
+    const stored = JSON.parse(raw) as unknown
+    if (
+      !isObject(stored) ||
+      stored.schemaVersion !== 1 ||
+      stored.tenantId !== props.tenantId ||
+      stored.salesOrderId !== props.plan.salesOrderId ||
+      stored.planId !== props.plan.id ||
+      !hasEntityShape(stored.purchaseOrder) ||
+      (stored.receipt !== undefined && !hasEntityShape(stored.receipt)) ||
+      (stored.inspection !== undefined && !hasEntityShape(stored.inspection)) ||
+      (stored.putAway !== undefined && !hasEntityShape(stored.putAway))
+    ) {
+      sessionStorage.removeItem(storageKey())
+      return
+    }
+    const snapshot = stored as unknown as StoredFlow
+    purchaseOrder.value = snapshot.purchaseOrder
+    receipt.value = snapshot.receipt
+    inspection.value = snapshot.inspection
+    putAway.value = snapshot.putAway
+    if (!receipt.value && ['ORDERED', 'PARTIALLY_RECEIVED'].includes(purchaseOrder.value.status)) {
+      resetReceiptForm()
+    } else if (receipt.value && !inspection.value) {
+      resetInspectionForm()
+    } else if (inspection.value && inspection.value.status !== 'INSPECTING' && !putAway.value) {
+      resetPutAwayForm()
+    }
+  } catch {
+    sessionStorage.removeItem(storageKey())
+  }
+}
 
 function amount(value: number): number {
   return Math.max(0, Number(value.toFixed(6)))
@@ -105,7 +201,41 @@ function inspectionStatusLabel(status: IncomingInspection['status']): string {
 }
 
 async function open(): Promise<void> {
-  if (!canStart.value || pending.value) return
+  if (!canOpen.value || pending.value) return
+  if (purchaseOrder.value) {
+    drawer.value = true
+    if (!suppliers.value.length || !warehouses.value.length) {
+      try {
+        const [supplierRows, warehouseRows] = await Promise.all([
+          masterDataApi.select('suppliers', '', 50),
+          masterDataApi.select('warehouses', '', 50),
+        ])
+        suppliers.value = supplierRows
+        warehouses.value = warehouseRows
+      } catch (error) {
+        report(error, '办理记录已恢复，但供应商或仓库选项加载失败')
+      }
+    }
+    return
+  }
+  if (needsRecovery.value) {
+    pending.value = 'options'
+    formError.value = ''
+    try {
+      const [supplierRows, warehouseRows] = await Promise.all([
+        masterDataApi.select('suppliers', '', 50),
+        masterDataApi.select('warehouses', '', 50),
+      ])
+      suppliers.value = supplierRows
+      warehouses.value = warehouseRows
+      drawer.value = true
+    } catch (error) {
+      report(error, '采购流程恢复页面打开失败，请检查基础资料')
+    } finally {
+      pending.value = ''
+    }
+    return
+  }
   pending.value = 'options'
   formError.value = ''
   purchaseOrder.value = undefined
@@ -134,6 +264,34 @@ async function open(): Promise<void> {
     drawer.value = true
   } catch (error) {
     report(error, '供应商或仓库选项加载失败，请先检查基础资料')
+  } finally {
+    pending.value = ''
+  }
+}
+
+async function recoverPurchase(): Promise<void> {
+  const purchaseOrderId = recoveryForm.purchaseOrderId.trim()
+  formError.value = ''
+  if (!purchaseOrderId) {
+    formError.value = '请填写采购单 ID。'
+    return
+  }
+  pending.value = 'recover-purchase'
+  try {
+    const recovered = await procurementApi.getPurchaseOrder(purchaseOrderId)
+    if (recovered.purchasePlanId !== props.plan.id) {
+      formError.value = '该采购单不属于当前采购计划，请核对后重试。'
+      return
+    }
+    purchaseOrder.value = recovered
+    receipt.value = undefined
+    inspection.value = undefined
+    putAway.value = undefined
+    if (['ORDERED', 'PARTIALLY_RECEIVED'].includes(recovered.status)) resetReceiptForm()
+    persistFlow()
+    ElMessage.success('采购流程已恢复，可继续办理')
+  } catch (error) {
+    report(error, '采购单加载失败，请检查采购单 ID')
   } finally {
     pending.value = ''
   }
@@ -175,6 +333,7 @@ async function createPurchase(): Promise<void> {
           overReceiptLimit: 0,
         })),
     })
+    persistFlow()
     ElMessage.success('采购单已创建')
     emit('changed')
   } catch (error) {
@@ -202,6 +361,7 @@ async function purchaseAction(action: 'submit' | 'approve' | 'place' | 'complete
     }[action]
     ElMessage.success(message)
     if (action === 'place') resetReceiptForm()
+    persistFlow()
     emit('changed')
   } catch (error) {
     report(error, '采购单状态更新失败，请刷新后重试')
@@ -270,6 +430,7 @@ async function createReceipt(): Promise<void> {
     } catch (refreshError) {
       report(refreshError, '到货已登记，但采购单最新状态加载失败')
     }
+    persistFlow()
     emit('changed')
   } catch (error) {
     report(error, '到货登记失败，请检查批次和数量')
@@ -335,6 +496,7 @@ async function createInspection(): Promise<void> {
         defectNote: line.defectNote.trim(),
       })),
     })
+    persistFlow()
     ElMessage.success('来料检验单已创建')
     emit('changed')
   } catch (error) {
@@ -363,6 +525,7 @@ async function inspectionAction(action: 'finish' | 'complete'): Promise<void> {
         report(refreshError, '检验已完成，但采购单最新状态加载失败')
       }
     }
+    persistFlow()
     emit('changed')
   } catch (error) {
     report(error, '来料检验状态更新失败，请刷新后重试')
@@ -419,6 +582,7 @@ async function createPutAway(): Promise<void> {
         .filter((line) => Number(line.quantity) > 0)
         .map((line) => ({ inspectionItemId: line.id, quantity: Number(line.quantity) })),
     })
+    persistFlow()
     ElMessage.success('上架单已创建')
   } catch (error) {
     report(error, '上架单创建失败，请检查仓库和数量')
@@ -441,6 +605,7 @@ async function completePutAway(): Promise<void> {
         report(refreshError, '物料已入库，但检验单最新状态加载失败')
       }
     }
+    persistFlow()
     emit('changed')
   } catch (error) {
     report(error, '入库失败，请刷新库存后重试')
@@ -448,17 +613,19 @@ async function completePutAway(): Promise<void> {
     pending.value = ''
   }
 }
+
+restoreFlow()
 </script>
 
 <template>
   <el-button
-    v-if="canStart"
+    v-if="canOpen"
     :data-testid="`open-${branchKey}-procurement-flow`"
     type="primary"
     :loading="pending === 'options'"
     @click="open"
   >
-    办理采购与来料
+    {{ openLabel }}
   </el-button>
 
   <el-drawer
@@ -488,7 +655,41 @@ async function completePutAway(): Promise<void> {
         role="alert"
       />
 
-      <section v-if="!purchaseOrder" class="flow-section">
+      <section v-if="needsRecovery" class="flow-section recovery-section">
+        <header>
+          <b>恢复已有采购流程</b><small>此采购计划已下单，需要先关联对应采购单</small>
+        </header>
+        <el-alert
+          title="这是升级前创建的历史单据。粘贴采购下单接口返回的采购单 ID，关联一次后即可继续到货、检验和上架。"
+          type="info"
+          :closable="false"
+          show-icon
+        />
+        <el-form
+          label-position="top"
+          :data-testid="`recover-${branchKey}-purchase-form`"
+          @submit.prevent="recoverPurchase"
+        >
+          <el-form-item label="采购单 ID" required>
+            <el-input
+              v-model="recoveryForm.purchaseOrderId"
+              :data-testid="`recover-${branchKey}-purchase-id`"
+              maxlength="64"
+              placeholder="例如：xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+              autocomplete="off"
+            />
+          </el-form-item>
+          <el-button
+            type="primary"
+            native-type="submit"
+            :loading="pending === 'recover-purchase'"
+          >
+            关联并继续办理
+          </el-button>
+        </el-form>
+      </section>
+
+      <section v-else-if="!purchaseOrder" class="flow-section">
         <header><b>01 创建采购单</b><small>待采购物料已按剩余需求预填</small></header>
         <el-form
           label-position="top"

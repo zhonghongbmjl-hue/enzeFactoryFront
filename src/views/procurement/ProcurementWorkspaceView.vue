@@ -224,6 +224,7 @@ onMounted(load)
           </el-button>
           <ProcurementFlowDrawer
             :plan="plan"
+            :tenant-id="auth.profile?.tenantId ?? ''"
             :can-manage="canManage"
             :can-approve="canApprove"
             @changed="load"
