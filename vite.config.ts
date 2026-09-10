@@ -4,9 +4,13 @@ import { createVuePlugins } from './vite.plugins'
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
+  // Keep the browser on a same-origin /api URL and switch only the dev proxy target.
+  // Named Vite modes provide explicit local/original backend profiles; this fallback
+  // makes an unprofiled Vite invocation use the backend checked out beside the frontend.
+  const apiTarget = env.VITE_DEV_API_TARGET || 'http://127.0.0.1:8080'
   const proxy = {
     '/api': {
-      target: env.VITE_DEV_API_TARGET || 'http://192.168.0.197:8080',
+      target: apiTarget,
       changeOrigin: true,
     },
   }

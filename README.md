@@ -3,6 +3,31 @@
 Vue 3 单页应用，默认通过同源 `/api/v1` 访问后端。开发服务器把 `/api` 代理到
 `VITE_DEV_API_TARGET`，生产环境应由网关提供同源路由或明确的来源白名单，不依赖通配 CORS。
 
+## 后端切换
+
+前端已提供两个具名模式，业务代码始终请求同源 `/api/v1`，仅由 Vite 代理切换实际后端：
+
+```shell
+# 默认：连接当前目录同级 backend（http://127.0.0.1:8080）
+corepack pnpm dev
+# 与默认命令等价
+corepack pnpm dev:local
+
+# 连接接入前使用的原后端（http://192.168.0.197:8080）
+corepack pnpm dev:original
+
+# Codex 联调检查同样默认走本地；需要时可显式检查原后端
+corepack pnpm test:codex
+corepack pnpm test:codex:original
+```
+
+对应配置分别保存在 `.env.backend-local` 与 `.env.backend-original`。如需临时覆盖本地模式的地址，
+可复制 `.env.example` 为不会提交的 `.env.backend-local.local`，再修改 `VITE_DEV_API_TARGET`。
+预览构建时可使用 `preview:local` / `preview:original` 做同样切换。
+
+本地后端位于前端项目同级的 `../backend`，使用 Spring Boot 默认端口 `8080`；启动后再运行前端。
+后端源码与原后端连接配置均保持独立，不需要在切换时改动源码。
+
 ## 固定工具链
 
 - Node.js `24.19.0` LTS（Krypton）

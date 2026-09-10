@@ -8,7 +8,7 @@ export const apiOrigin = stripTrailingSlash(
     process.env.GARMENT_E2E_EXTERNAL_BACKEND_ORIGIN ||
     process.env.GARMENT_E2E_EXTERNAL_BACKEND_URL?.replace(/\/api\/v1\/?$/, '') ||
     process.env.VITE_DEV_API_TARGET ||
-    'http://192.168.0.197:8080',
+    'http://127.0.0.1:8080',
 )
 
 export const apiBaseUrl = stripTrailingSlash(
