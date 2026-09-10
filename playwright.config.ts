@@ -1,6 +1,7 @@
 import { defineConfig, devices } from '@playwright/test'
 
-const externalBaseUrl = process.env.GARMENT_E2E_EXTERNAL_BASE_URL
+const externalBaseUrl =
+  process.env.GARMENT_E2E_EXTERNAL_BASE_URL ?? process.env.GARMENT_E2E_UI_BASE_URL
 
 export default defineConfig({
   testDir: './e2e',
@@ -9,7 +10,7 @@ export default defineConfig({
   fullyParallel: true,
   retries: 1,
   reporter: 'html',
-  use: { baseURL: externalBaseUrl ?? 'http://127.0.0.1:4173', trace: 'on-first-retry' },
+  use: { baseURL: externalBaseUrl ?? 'http://localhost:5173', trace: 'on-first-retry' },
   webServer: externalBaseUrl
     ? undefined
     : [
@@ -21,8 +22,8 @@ export default defineConfig({
         },
         {
           command:
-            'corepack pnpm build-only --mode e2e && corepack pnpm preview --mode e2e --host 127.0.0.1',
-          url: 'http://127.0.0.1:4173',
+            'corepack pnpm build-only --mode e2e && corepack pnpm preview --mode e2e --host 127.0.0.1 --port 5173',
+          url: 'http://127.0.0.1:5173',
           timeout: 120_000,
           reuseExistingServer: !process.env.CI,
         },

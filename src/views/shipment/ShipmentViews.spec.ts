@@ -3,10 +3,13 @@ import { createPinia, setActivePinia } from 'pinia'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { shipmentApi } from '@/api/shipment'
+import { createIdempotencyAttempt } from '@/api/http'
 import { useAuthStore } from '@/stores/auth'
+import { clearTenantCaches } from '@/stores/tenantCache'
 import type { AfterSalesCase, ShipmentOrderWorkspace } from '@/types/shipment'
 import AfterSalesReworkView from './AfterSalesReworkView.vue'
 import ShipmentWorkspaceView from './ShipmentWorkspaceView.vue'
+import { useShipmentMutationFlight } from './shipmentMutationFlight'
 
 vi.mock('@/api/shipment', () => ({
   shipmentApi: {
@@ -35,6 +38,9 @@ const BOX_1 = '88888888-8888-4888-8888-888888888888'
 const PACKING_ITEM_1 = '99999999-9999-4999-8999-999999999999'
 const BOX_2 = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
 const PACKING_ITEM_2 = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
+const AFTER_SALES_BOX = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee'
+const AFTER_SALES_PACKING_ITEM = 'ffffffff-ffff-4fff-8fff-ffffffffffff'
+const AFTER_SALES_INSPECTION = '12121212-1212-4121-8121-121212121212'
 
 function selectField(wrapper: ReturnType<typeof mount>, testId: string) {
   const field = wrapper
@@ -171,6 +177,7 @@ const afterSales: AfterSalesCase = {
 describe('包装发运与售后返工工作台', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
+    clearTenantCaches()
     vi.clearAllMocks()
     vi.mocked(shipmentApi.orderWorkspace).mockResolvedValue(structuredClone(workspace))
     vi.mocked(shipmentApi.getAfterSales).mockResolvedValue(structuredClone(afterSales))
@@ -257,14 +264,14 @@ describe('包装发运与售后返工工作台', () => {
       shipments: [{ ...structuredClone(workspace.shipments[0]!), status: 'APPROVED' }],
     })
     const wrapper = await renderShipment()
-    await wrapper.get(`[data-testid="progress-${SHIPMENT_LINE}"]`).setValue('1.000000')
+    await wrapper.get(`[data-testid="progress-${SHIPMENT_LINE}"]`).setValue('1.0000001')
     await wrapper.get(`[data-testid="progress-${SHIPMENT_LINE_2}"]`).setValue('0.500000')
     await wrapper.get(`[data-testid="dispatch-${SHIPMENT}"]`).trigger('click')
     expect(shipmentApi.dispatch).toHaveBeenCalledWith(
       SHIPMENT,
       4,
       [
-        { shipmentLineId: SHIPMENT_LINE, quantity: '1.000000' },
+        { shipmentLineId: SHIPMENT_LINE, quantity: '1.0000001' },
         { shipmentLineId: SHIPMENT_LINE_2, quantity: '0.500000' },
       ],
       expect.any(String),
@@ -273,6 +280,10 @@ describe('包装发运与售后返工工作台', () => {
 
   it('从多个包装箱选择每条包装明细并创建完整发运计划', async () => {
     permissions(['SHIPMENT_VIEW', 'SHIPMENT_MANAGE'])
+    vi.mocked(shipmentApi.orderWorkspace).mockResolvedValue({
+      ...structuredClone(workspace),
+      shipments: [],
+    })
     const wrapper = await renderShipment()
     await wrapper
       .get(`[data-testid="shipment-select-${PACKING_ITEM_1}"]`)
@@ -295,6 +306,160 @@ describe('包装发运与售后返工工作台', () => {
       },
       expect.any(String),
     )
+  })
+
+  it('普通发运不展示已用尽明细和售后重新装箱', async () => {
+    permissions(['SHIPMENT_VIEW', 'SHIPMENT_MANAGE'])
+    const normalBox = structuredClone(workspace.boxes[0]!)
+    const fullyPlannedShipment = structuredClone(workspace.shipments[0]!)
+    fullyPlannedShipment.lines = [fullyPlannedShipment.lines[0]!]
+    vi.mocked(shipmentApi.orderWorkspace).mockResolvedValue({
+      ...structuredClone(workspace),
+      boxes: [
+        normalBox,
+        {
+          id: AFTER_SALES_BOX,
+          boxNo: 'box2',
+          totalQuantity: '2.000000',
+          createdAt: '2026-08-25T06:00:00Z',
+          lines: [
+            {
+              id: AFTER_SALES_PACKING_ITEM,
+              qualityInspectionId: null,
+              afterSalesInspectionId: AFTER_SALES_INSPECTION,
+              workOrderId: 'work-order-1',
+              productionBatchId: 'batch-1',
+              orderItemId: 'item-1',
+              skuId: 'sku-1',
+              quantity: '2.000000',
+            },
+          ],
+        },
+      ],
+      shipments: [fullyPlannedShipment],
+    })
+
+    const wrapper = await renderShipment()
+
+    expect(wrapper.find(`[data-testid="shipment-select-${PACKING_ITEM_1}"]`).exists()).toBe(false)
+    expect(
+      wrapper.find(`[data-testid="shipment-select-${AFTER_SALES_PACKING_ITEM}"]`).exists(),
+    ).toBe(false)
+    expect(wrapper.get('[data-testid="create-shipment"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[data-testid="create-shipment-form"]').text()).toContain(
+      '售后重新装箱不参与普通发运，请从下方对应售后任务创建补发发运单',
+    )
+    await wrapper.get('[data-testid="create-shipment-form"]').trigger('submit')
+    expect(shipmentApi.createShipment).not.toHaveBeenCalled()
+  })
+
+  it('售后重新装箱从售后任务调用补发发运动作', async () => {
+    permissions(['SHIPMENT_VIEW', 'SHIPMENT_MANAGE'])
+    vi.mocked(shipmentApi.getAfterSales).mockResolvedValue({
+      ...structuredClone(afterSales),
+      status: 'REPACKING',
+      afterSalesInspectionId: AFTER_SALES_INSPECTION,
+      repackingOrderId: AFTER_SALES_BOX,
+      effectiveNextAction: 'CREATE_RESHIPMENT',
+      effectiveNextPermission: 'SHIPMENT_MANAGE',
+      version: 6,
+    })
+    const wrapper = await renderAfterSales()
+
+    expect(wrapper.get('[data-testid="after-sales-next-action"]').text()).toContain(
+      '创建补发发运单',
+    )
+    await wrapper.get('[data-testid="after-sales-next-action"]').trigger('click')
+
+    expect(shipmentApi.transitionAfterSales).toHaveBeenCalledWith(
+      AFTER_SALES,
+      'shipment',
+      { expectedVersion: 6 },
+      expect.any(String),
+    )
+  })
+
+  it('刷新后根据权威事实清除误投普通接口的售后装箱请求', async () => {
+    permissions(['SHIPMENT_VIEW', 'SHIPMENT_MANAGE'])
+    const flightStore = useShipmentMutationFlight()
+    const seedOwner = Symbol('seed-misrouted-after-sales')
+    flightStore.setScope({ tenantId: TENANT, userId: USER, authGeneration: 1 })
+    flightStore.activate(seedOwner)
+    const pending = flightStore.begin(seedOwner, {
+      sourceId: ORDER,
+      request: {
+        name: 'createShipment',
+        payload: {
+          salesOrderId: ORDER,
+          lines: [
+            {
+              packingOrderId: AFTER_SALES_BOX,
+              packingItemId: AFTER_SALES_PACKING_ITEM,
+              quantity: '2.000000',
+            },
+          ],
+        },
+      },
+      key: 'shipment-recovery-0001',
+      attempt: createIdempotencyAttempt(),
+    })!
+    flightStore.markOutcomeUnknown(pending)
+    flightStore.deactivate(seedOwner)
+    vi.mocked(shipmentApi.orderWorkspace).mockResolvedValue({
+      ...structuredClone(workspace),
+      boxes: [
+        {
+          id: AFTER_SALES_BOX,
+          boxNo: 'box2',
+          totalQuantity: '2.000000',
+          createdAt: '2026-08-25T06:00:00Z',
+          lines: [
+            {
+              id: AFTER_SALES_PACKING_ITEM,
+              qualityInspectionId: null,
+              afterSalesInspectionId: AFTER_SALES_INSPECTION,
+              workOrderId: 'work-order-1',
+              productionBatchId: 'batch-1',
+              orderItemId: 'item-1',
+              skuId: 'sku-1',
+              quantity: '2.000000',
+            },
+          ],
+        },
+      ],
+      shipments: [],
+    })
+
+    const wrapper = await renderShipment()
+
+    expect(wrapper.text()).toContain('已根据权威发运事实清除旧的错误请求')
+    expect(flightStore.flight.value).toBeNull()
+    expect(shipmentApi.createShipment).not.toHaveBeenCalled()
+  })
+
+  it('普通发运仅允许提交未被发运计划占用的余额', async () => {
+    permissions(['SHIPMENT_VIEW', 'SHIPMENT_MANAGE'])
+    const partiallyPlannedShipment = structuredClone(workspace.shipments[0]!)
+    partiallyPlannedShipment.lines = [
+      { ...partiallyPlannedShipment.lines[0]!, plannedQuantity: '5.000000' },
+    ]
+    vi.mocked(shipmentApi.orderWorkspace).mockResolvedValue({
+      ...structuredClone(workspace),
+      boxes: [structuredClone(workspace.boxes[0]!)],
+      shipments: [partiallyPlannedShipment],
+    })
+    const wrapper = await renderShipment()
+
+    expect(wrapper.get('[data-testid="create-shipment-form"]').text()).toContain('可发余额 3')
+    await wrapper
+      .get(`[data-testid="shipment-select-${PACKING_ITEM_1}"]`)
+      .get('input[type="checkbox"]')
+      .setValue(true)
+    await wrapper.get(`[data-testid="shipment-quantity-${PACKING_ITEM_1}"]`).setValue('4')
+    await wrapper.get('[data-testid="create-shipment-form"]').trigger('submit')
+
+    expect(wrapper.get('[role="alert"]').text()).toContain('不超过可发余额')
+    expect(shipmentApi.createShipment).not.toHaveBeenCalled()
   })
 
   it('申请人与当前审批人相同时隐藏审批动作并解释职责分离', async () => {
@@ -322,6 +487,12 @@ describe('包装发运与售后返工工作台', () => {
     expect(wrapper.get('[data-testid="after-sales-create-form"]').exists()).toBe(true)
     expect(wrapper.text()).toContain('待处理售后')
     expect(wrapper.text()).toContain('客户反馈')
+    expect(selectField(wrapper, 'after-sales-reason').props('options')).toEqual(
+      expect.arrayContaining([
+        { value: 'QUALITY_ISSUE', label: '质量问题' },
+        { value: 'OTHER', label: '其他' },
+      ]),
+    )
   })
 
   it('从已签收原发运明细提交客户反馈和退货数量并刷新权威列表', async () => {
@@ -333,7 +504,7 @@ describe('包装发运与售后返工工作台', () => {
     const wrapper = await renderShipment()
     await selectField(wrapper, 'after-sales-source').setValue(SHIPMENT_LINE)
     await wrapper.get('[data-testid="after-sales-quantity"]').setValue('1.000000')
-    await wrapper.get('[data-testid="after-sales-reason"]').setValue('seam_open')
+    await selectField(wrapper, 'after-sales-reason').setValue('QUALITY_ISSUE')
     await wrapper.get('[data-testid="after-sales-feedback"]').setValue('客户反馈开线')
     await wrapper.get('[data-testid="after-sales-create-form"]').trigger('submit')
     expect(shipmentApi.receiveAfterSales).toHaveBeenCalledWith(
@@ -342,7 +513,7 @@ describe('包装发运与售后返工工作台', () => {
         originalPackingOrderId: BOX_1,
         originalPackingItemId: PACKING_ITEM_1,
         quantity: '1.000000',
-        reasonCode: 'SEAM_OPEN',
+        reasonCode: 'QUALITY_ISSUE',
         customerFeedback: '客户反馈开线',
       },
       expect.any(String),

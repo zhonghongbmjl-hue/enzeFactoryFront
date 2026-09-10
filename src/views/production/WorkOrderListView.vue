@@ -1,16 +1,36 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import SelectField from '@/components/form/SelectField.vue'
+import { computed, onMounted, ref } from 'vue'
 import { storeToRefs } from 'pinia'
+import { useRoute } from 'vue-router'
+import { planningApi } from '@/api/planning'
 import { productionApi } from '@/api/production'
 import { createIdempotencyAttempt } from '@/api/http'
 import { WORK_ORDER_PAGE_SIZE, useWorkOrderListStore } from '@/stores/workOrders'
+import type { ProductionPlan } from '@/types/planning'
 import type { WorkOrderSummary } from '@/types/production'
 
+const route = useRoute()
 const workOrders = useWorkOrderListStore()
 const { rows, loading, errorMessage, page, totalPages, totalElements } = storeToRefs(workOrders)
+const routePlanId = route.query?.productionPlanId
+const productionPlanId = typeof routePlanId === 'string' ? routePlanId.trim() : ''
 const productionScheduleId = ref('')
+const selectedPlan = ref<ProductionPlan>()
+const scheduleLoading = ref(false)
+const scheduleError = ref('')
 const converting = ref(false)
 const conversion = createIdempotencyAttempt()
+let scheduleRequestGeneration = 0
+
+const scheduleOptions = computed(() =>
+  (selectedPlan.value?.items ?? [])
+    .filter((item) => item.schedule?.approvalStatus === 'APPROVED')
+    .map((item) => ({
+      label: `${item.schedule.plannedBatchCode} · 数量 ${item.schedule.quantity} · ${item.schedule.startDate} 至 ${item.schedule.endDate}`,
+      value: item.schedule.id,
+    })),
+)
 
 const statusLabel: Record<WorkOrderSummary['status'], string> = {
   DRAFT: '草稿',
@@ -28,6 +48,37 @@ const statusLabel: Record<WorkOrderSummary['status'], string> = {
 
 function load(targetPage = page.value): Promise<void> {
   return workOrders.load(targetPage)
+}
+
+async function loadPlanSchedules(): Promise<void> {
+  const planId = productionPlanId
+  const generation = ++scheduleRequestGeneration
+  selectedPlan.value = undefined
+  productionScheduleId.value = ''
+  scheduleError.value = ''
+  if (!planId || scheduleLoading.value) return
+  scheduleLoading.value = true
+  try {
+    const plan = await planningApi.get(planId)
+    if (generation !== scheduleRequestGeneration) return
+    if (plan.status !== 'APPROVED') {
+      scheduleError.value = '该排产计划尚未审批，不能生成生产工单'
+      return
+    }
+    selectedPlan.value = plan
+    if (!scheduleOptions.value.length) {
+      scheduleError.value = '该排产计划没有可用的已审批排程'
+      return
+    }
+    if (scheduleOptions.value.length === 1) {
+      productionScheduleId.value = String(scheduleOptions.value[0]?.value ?? '')
+    }
+  } catch (error) {
+    if (generation !== scheduleRequestGeneration) return
+    scheduleError.value = error instanceof Error ? error.message : '排产计划读取失败'
+  } finally {
+    if (generation === scheduleRequestGeneration) scheduleLoading.value = false
+  }
 }
 
 async function convert(): Promise<void> {
@@ -54,7 +105,10 @@ function asWorkOrder(row: unknown): WorkOrderSummary {
   return row as WorkOrderSummary
 }
 
-onMounted(load)
+onMounted(() => {
+  void load()
+  if (productionPlanId) void loadPlanSchedules()
+})
 defineExpose({ load })
 </script>
 
@@ -70,19 +124,57 @@ defineExpose({ load })
     </header>
 
     <el-form data-testid="convert-form" class="convert-panel" inline @submit.prevent="convert">
-      <el-form-item label="已审批排程 ID">
-        <el-input
-          v-model.trim="productionScheduleId"
+      <div v-if="scheduleLoading" class="plan-state" role="status" aria-live="polite">
+        <strong>正在读取已审批排程…</strong>
+        <small>请稍候，无需填写任何系统ID。</small>
+      </div>
+      <div v-else-if="selectedPlan" class="plan-summary">
+        <small>已读取排产计划</small>
+        <strong>{{ selectedPlan.planNo }}</strong>
+      </div>
+      <div v-else-if="!productionPlanId" class="plan-empty">
+        <div>
+          <strong>请先选择已审批排产</strong>
+          <small>从生产排产页进入后，计划会自动带入并可在刷新后恢复。</small>
+        </div>
+        <RouterLink class="plan-entry-link" :to="{ name: 'production' }">
+          前往生产排产
+        </RouterLink>
+      </div>
+      <el-form-item v-if="selectedPlan" label="已审批排程">
+        <SelectField
+          v-model="productionScheduleId"
           name="productionScheduleId"
-          placeholder="ProductionSchedule UUID"
+          aria-label="已审批排程"
+          data-testid="convert-schedule"
+          placeholder="选择计划批次 / 数量"
+          filterable
+          :options="scheduleOptions"
+          :disabled="scheduleLoading || converting || !scheduleOptions.length"
         />
       </el-form-item>
-      <el-form-item>
-        <el-button type="primary" native-type="submit" :loading="converting">
+      <el-form-item v-if="selectedPlan">
+        <el-button
+          type="primary"
+          native-type="submit"
+          :loading="converting"
+          :disabled="!productionScheduleId"
+        >
           {{ converting ? '转换中…' : '生成工单与批次' }}
         </el-button>
       </el-form-item>
-      <small>同一排程无论重试或并发提交，都只生成一张工单与一个批次。</small>
+      <el-alert
+        v-if="scheduleError"
+        class="schedule-error"
+        :title="scheduleError"
+        type="error"
+        :closable="false"
+        show-icon
+      />
+      <RouterLink v-if="scheduleError" class="plan-entry-link" :to="{ name: 'production' }">
+        返回生产排产重新选择
+      </RouterLink>
+      <small v-if="selectedPlan">选择计划批次后生成工单；同一排程只生成一张工单与一个批次。</small>
     </el-form>
 
     <el-alert v-if="errorMessage" :title="errorMessage" type="error" :closable="false" show-icon />
@@ -221,6 +313,52 @@ button:disabled {
   border: 1px solid #d8e0dc;
   border-radius: 14px;
 }
+.plan-state,
+.plan-summary,
+.plan-empty {
+  display: grid;
+  grid-column: 1 / -1;
+  gap: 5px;
+  padding: 14px;
+  border: 1px solid #d8e0dc;
+  border-radius: 10px;
+  background: #f8faf8;
+}
+.plan-summary strong {
+  color: #173f43;
+  font-size: 18px;
+}
+.plan-empty {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+.plan-empty > div {
+  display: grid;
+  gap: 5px;
+}
+.plan-entry-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 0 16px;
+  border-radius: 10px;
+  background: #e8b95d;
+  color: #1f2d2c;
+  font-weight: 800;
+  text-decoration: none;
+}
+.plan-entry-link:focus-visible {
+  outline: 3px solid #173f43;
+  outline-offset: 3px;
+}
+.convert-panel :deep(.el-select) {
+  width: 100%;
+  min-width: 0;
+}
+.schedule-error {
+  grid-column: 1 / -1;
+}
 .convert-panel label {
   display: grid;
   gap: 7px;
@@ -311,6 +449,9 @@ td small {
     flex-direction: column;
   }
   .convert-panel {
+    grid-template-columns: 1fr;
+  }
+  .plan-empty {
     grid-template-columns: 1fr;
   }
 }

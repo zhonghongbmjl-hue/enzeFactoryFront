@@ -2,11 +2,24 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { qualityApi } from '@/api/quality'
+import { salesOrderApi } from '@/api/orders'
 import { ApiClientError } from '@/api/http'
 import { useAuthStore } from '@/stores/auth'
 import { clearTenantCaches } from '@/stores/tenantCache'
 import { qualityMutationStorageKey } from './qualityMutationFlight'
 import QualityWorkspaceView from './QualityWorkspaceView.vue'
+
+const routeState = vi.hoisted(() => ({ query: {} as Record<string, string> }))
+const routerReplace = vi.hoisted(() => vi.fn())
+
+vi.mock('vue-router', async () => {
+  const actual = await vi.importActual<typeof import('vue-router')>('vue-router')
+  return {
+    ...actual,
+    useRoute: () => routeState,
+    useRouter: () => ({ replace: routerReplace }),
+  }
+})
 
 vi.mock('@/api/quality', () => ({
   qualityApi: {
@@ -17,6 +30,9 @@ vi.mock('@/api/quality', () => ({
     completeRework: vi.fn(),
     bridgeLegacyRework: vi.fn(),
   },
+}))
+vi.mock('@/api/orders', () => ({
+  salesOrderApi: { list: vi.fn() },
 }))
 
 const SALES_ORDER_ID = '1135b20e-6cd4-4aac-84eb-f135401e7e12'
@@ -36,6 +52,11 @@ function selectField(wrapper: ReturnType<typeof mount>, name: string) {
     .find((item) => item.props('name') === name)
   if (!field) throw new Error(`SelectField [name="${name}"] not found`)
   return field
+}
+
+async function chooseSalesOrder(wrapper: ReturnType<typeof mount>, id: string): Promise<void> {
+  selectField(wrapper, 'salesOrderId').vm.$emit('update:modelValue', id)
+  await wrapper.vm.$nextTick()
 }
 
 const aggregate = {
@@ -169,7 +190,22 @@ describe('质量工作台', () => {
     auth.generation = 7
     auth.sessionStatus = 'authenticated'
     vi.clearAllMocks()
+    routeState.query = {}
     window.sessionStorage.clear()
+    vi.mocked(salesOrderApi.list).mockResolvedValue({
+      content: [
+        {
+          id: SALES_ORDER_ID,
+          orderNo: 'SO-QUALITY',
+          customerName: '经纬客户',
+          status: 'QUALITY_INSPECTION',
+        },
+      ],
+      totalElements: 1,
+      totalPages: 1,
+      page: 0,
+      size: 50,
+    } as never)
     vi.mocked(qualityApi.aggregateOrder).mockResolvedValue(orderAggregate)
     vi.mocked(qualityApi.aggregate).mockResolvedValue(aggregate)
     vi.mocked(qualityApi.trim).mockResolvedValue({} as never)
@@ -178,12 +214,44 @@ describe('质量工作台', () => {
     vi.mocked(qualityApi.bridgeLegacyRework).mockResolvedValue({} as never)
   })
 
+  it('用订单号和客户生成可搜索选项，内部 ID 只作为选中值', async () => {
+    const wrapper = mount(QualityWorkspaceView)
+    await flushPromises()
+
+    expect(salesOrderApi.list).toHaveBeenCalledWith({ page: 0, size: 50 })
+    expect(selectField(wrapper, 'salesOrderId').props('options')).toEqual([
+      {
+        value: SALES_ORDER_ID,
+        label: 'SO-QUALITY · 经纬客户 · 质检中',
+      },
+    ])
+    expect(wrapper.text()).toContain('选择销售订单')
+    expect(wrapper.text()).not.toContain('销售订单 ID')
+  })
+
+  it('从工单链接进入时自动解析销售订单并恢复质量事实', async () => {
+    routeState.query = { workOrderId: WORK_ORDER_ID }
+
+    const wrapper = mount(QualityWorkspaceView)
+    await flushPromises()
+
+    expect(qualityApi.aggregate).toHaveBeenCalledTimes(1)
+    expect(qualityApi.aggregate).toHaveBeenCalledWith(WORK_ORDER_ID)
+    expect(qualityApi.aggregateOrder).toHaveBeenCalledWith(SALES_ORDER_ID)
+    expect(selectField(wrapper, 'salesOrderId').props('modelValue')).toBe(SALES_ORDER_ID)
+    expect(wrapper.text()).toContain('SO-QUALITY')
+  })
+
   it('shows immutable source pools, the one formal inspection and rework lineage', async () => {
     const wrapper = mount(QualityWorkspaceView)
-    await wrapper.get('[name="salesOrderId"]').setValue(SALES_ORDER_ID)
+    await chooseSalesOrder(wrapper, SALES_ORDER_ID)
     await wrapper.get('[data-testid="load-quality"]').trigger('submit')
     await flushPromises()
 
+    expect(routerReplace).toHaveBeenCalledWith({
+      name: 'quality',
+      query: { salesOrderId: SALES_ORDER_ID },
+    })
     expect(wrapper.text()).toContain('生产完成账本')
     expect(wrapper.text()).toContain('10.000000')
     expect(wrapper.text()).toContain('待后整')
@@ -231,7 +299,7 @@ describe('质量工作台', () => {
         historyPage: { ...pendingFacts.historyPage, page: 1, hasNext: false },
       })
     const wrapper = mount(QualityWorkspaceView)
-    await wrapper.get('[name="salesOrderId"]').setValue(SALES_ORDER_ID)
+    await chooseSalesOrder(wrapper, SALES_ORDER_ID)
     await wrapper.get('[data-testid="load-quality"]').trigger('submit')
     await flushPromises()
 
@@ -247,11 +315,15 @@ describe('质量工作台', () => {
     const pending = deferred<unknown>()
     vi.mocked(qualityApi.trim).mockReturnValueOnce(pending.promise as never)
     const wrapper = await loaded()
-    await wrapper.get('[name="trimQuantity"]').setValue('2.000000')
+    await wrapper.get('[name="trimQuantity"]').setValue('2.1234567')
 
-    await wrapper.get('[data-testid="trim-form"]').trigger('submit')
-    await wrapper.get('[data-testid="trim-form"]').trigger('submit')
+    await wrapper.get('[data-testid="trim-submit"]').trigger('click')
+    await wrapper.get('[data-testid="trim-submit"]').trigger('click')
     expect(qualityApi.trim).toHaveBeenCalledTimes(1)
+    expect(qualityApi.trim).toHaveBeenCalledWith(
+      { workOrderId: WORK_ORDER_ID, quantity: '2.1234567' },
+      expect.any(String),
+    )
     expect(wrapper.get('[data-testid="trim-submit"]').attributes('disabled')).toBeDefined()
     pending.resolve({})
     await flushPromises()
@@ -268,7 +340,7 @@ describe('质量工作台', () => {
       .mockReturnValueOnce(oldResponse.promise)
       .mockReturnValueOnce(newResponse.promise)
     const wrapper = mount(QualityWorkspaceView)
-    await wrapper.get('[name="salesOrderId"]').setValue(SALES_ORDER_ID)
+    await chooseSalesOrder(wrapper, SALES_ORDER_ID)
     await wrapper.get('[data-testid="load-quality"]').trigger('submit')
     await wrapper.get('[data-testid="load-quality"]').trigger('submit')
     newResponse.resolve({ ...orderAggregate, passedQuantity: '8.000000' })
@@ -280,12 +352,30 @@ describe('质量工作台', () => {
     expect(wrapper.text()).not.toContain('1.000000')
   })
 
+  it('同一订单刷新时保留当前内容，避免接口期间整页闪烁', async () => {
+    const wrapper = await loaded()
+    const refreshed = deferred<typeof orderAggregate>()
+    vi.mocked(qualityApi.aggregateOrder).mockReturnValueOnce(refreshed.promise)
+
+    await wrapper.get('[data-testid="load-quality"]').trigger('submit')
+    await Promise.resolve()
+
+    expect(wrapper.find('[data-testid="order-quality-tree"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="trim-form"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain(INSPECTION_ID)
+
+    refreshed.resolve({ ...orderAggregate, passedQuantity: '5.000000' })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('5.000000')
+  })
+
   it('submits split quantities and completes the selected rework with idempotency keys', async () => {
     const wrapper = await loaded()
     for (const [name, value] of Object.entries({
-      submittedQuantity: '2.000000',
-      passedQuantity: '1.000000',
-      failedQuantity: '1.000000',
+      submittedQuantity: '2',
+      passedQuantity: '1',
+      failedQuantity: '1',
       inspectionMethod: 'FULL',
       defectCode: ' seam:01 ',
       disposition: '车间返修',
@@ -299,19 +389,19 @@ describe('质量工作台', () => {
       expect.objectContaining({
         workOrderId: WORK_ORDER_ID,
         inspectionMethod: 'FULL',
-        submittedQuantity: '2.000000',
+        submittedQuantity: '2',
         defectCode: 'SEAM:01',
       }),
       expect.any(String),
     )
 
-    await wrapper.get('[name="reworkPassedQuantity"]').setValue('2.000000')
-    await wrapper.get('[name="reworkFailedQuantity"]').setValue('0.000000')
+    await wrapper.get('[name="reworkPassedQuantity"]').setValue('2')
+    await wrapper.get('[name="reworkFailedQuantity"]').setValue('0')
     await wrapper.get('[data-testid="rework-form"]').trigger('submit')
     await flushPromises()
     expect(qualityApi.completeRework).toHaveBeenCalledWith(
       REWORK_ID,
-      expect.objectContaining({ passedQuantity: '2.000000' }),
+      expect.objectContaining({ passedQuantity: '2', failedQuantity: '0' }),
       expect.any(String),
     )
   })
@@ -354,7 +444,7 @@ describe('质量工作台', () => {
     vi.mocked(qualityApi.aggregateOrder).mockReturnValueOnce(bOrder.promise)
     vi.mocked(qualityApi.aggregate).mockRejectedValueOnce(new Error('B detail unavailable'))
 
-    await wrapper.get('[name="salesOrderId"]').setValue('sales-2')
+    await chooseSalesOrder(wrapper, 'sales-2')
     await wrapper.get('[data-testid="load-quality"]').trigger('submit')
 
     const clearedImmediately = !wrapper.find('[data-testid="inspection-form"]').exists()
@@ -414,7 +504,10 @@ describe('质量工作台', () => {
 
       expect(qualityApi[apiMethod]).toHaveBeenCalledTimes(1)
       expect(wrapper.text()).toContain('已入账，刷新失败/待同步')
-      expect(wrapper.find(formSelector).exists()).toBe(false)
+      expect(wrapper.find(formSelector).exists()).toBe(true)
+      expect(wrapper.get('[data-testid="trim-submit"]').attributes('disabled')).toBeDefined()
+      expect(wrapper.get('[data-testid="inspection-submit"]').attributes('disabled')).toBeDefined()
+      expect(wrapper.get('[data-testid="rework-submit"]').attributes('disabled')).toBeDefined()
       await originalForm.trigger('submit')
       await flushPromises()
       expect(qualityApi[apiMethod]).toHaveBeenCalledTimes(1)
@@ -454,7 +547,7 @@ describe('质量工作台', () => {
       )) {
         await wrapper.get(mutationForm(other)).trigger('submit')
       }
-      await wrapper.get('[name="salesOrderId"]').setValue('sales-2')
+      await chooseSalesOrder(wrapper, 'sales-2')
       await wrapper.get('[data-testid="load-quality"]').trigger('submit')
       await selectField(wrapper, 'selectedWorkOrderId').setValue('wo-2')
 
@@ -479,7 +572,7 @@ describe('质量工作台', () => {
       vi.mocked(qualityApi.aggregateOrder).mockRejectedValueOnce(new Error('refresh failed'))
 
       await wrapper.get(mutationForm(mutation)).trigger('submit')
-      await wrapper.get('[name="salesOrderId"]').setValue('sales-2')
+      await chooseSalesOrder(wrapper, 'sales-2')
       pending.resolve({ id: `${mutation}-result` })
       await flushPromises()
 
@@ -495,9 +588,7 @@ describe('质量工作台', () => {
       expect(qualityApi.aggregateOrder).toHaveBeenNthCalledWith(3, SALES_ORDER_ID)
       expect(qualityApi.aggregate).toHaveBeenNthCalledWith(2, WORK_ORDER_ID)
       expect(wrapper.find('[data-testid="quality-sync-pending"]').exists()).toBe(false)
-      expect(wrapper.findAllComponents({ name: 'ElInput' })[0]?.props('modelValue')).toBe(
-        SALES_ORDER_ID,
-      )
+      expect(selectField(wrapper, 'salesOrderId').props('modelValue')).toBe(SALES_ORDER_ID)
       expect(mutationCallCount(mutation)).toBe(1)
     },
   )
@@ -566,7 +657,7 @@ describe('质量工作台', () => {
 
     expect(qualityApi.trim).toHaveBeenCalledTimes(1)
     expect(qualityApi.trim).toHaveBeenCalledWith(
-      { workOrderId: WORK_ORDER_ID, quantity: '1.000000' },
+      { workOrderId: WORK_ORDER_ID, quantity: '1' },
       expect.any(String),
     )
   })
@@ -642,7 +733,7 @@ describe('质量工作台', () => {
 
 async function loaded() {
   const wrapper = mount(QualityWorkspaceView)
-  await wrapper.get('[name="salesOrderId"]').setValue(SALES_ORDER_ID)
+  await chooseSalesOrder(wrapper, SALES_ORDER_ID)
   await wrapper.get('[data-testid="load-quality"]').trigger('submit')
   await flushPromises()
   return wrapper

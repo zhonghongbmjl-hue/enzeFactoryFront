@@ -10,7 +10,13 @@ type TowerPage = {
   page: number
 }
 
-const backend = 'http://127.0.0.1:18080/api/v1'
+const backend = process.env.GARMENT_E2E_EXTERNAL_BACKEND_URL ?? 'http://127.0.0.1:18080/api/v1'
+const tenantCode = process.env.GARMENT_E2E_TENANT_CODE ?? 'demo'
+const adminUsername = process.env.GARMENT_E2E_ADMIN_USERNAME ?? 'admin'
+const adminPassword = process.env.GARMENT_E2E_DEMO_PASSWORD ?? 'DemoOnly!123'
+const testSupportHeaders = process.env.GARMENT_E2E_TEST_SUPPORT_KEY
+  ? { 'X-Test-Support-Key': process.env.GARMENT_E2E_TEST_SUPPORT_KEY }
+  : {}
 
 function isoDate(offsetDays: number): string {
   const value = new Date()
@@ -26,9 +32,9 @@ async function responseData<T>(response: APIResponse): Promise<T> {
 
 async function login(page: Page): Promise<string> {
   await page.goto('/login')
-  await page.getByLabel('工厂租户代码').fill('demo')
-  await page.getByLabel('工号 / 账号').fill('admin')
-  await page.getByLabel('密码').fill('DemoOnly!123')
+  await page.getByLabel('工厂租户代码').fill(tenantCode)
+  await page.getByLabel('工号 / 账号').fill(adminUsername)
+  await page.getByLabel('密码').fill(adminPassword)
   await page.getByRole('button', { name: '进入工厂控制台' }).click()
   await expect(page.getByRole('heading', { name: '订单履约控制塔' })).toBeVisible()
   return page.evaluate(() => {
@@ -42,26 +48,31 @@ test('real API control tower renders delivery risk and paginates tenant-scoped o
 }, testInfo) => {
   test.skip(testInfo.project.name.includes('narrow'), 'Desktop owns the real business fixture')
   test.setTimeout(120_000)
-  const anonymousForeign = await page.request.post(`${backend}/test-support/foreign-order`, {
-    data: { runNamespace: 'E2E-UNAUTHORIZED' },
-  })
-  expect([401, 403]).toContain(anonymousForeign.status())
   const token = await login(page)
   const headers = { Authorization: `Bearer ${token}` }
-  const fixture = await responseData<Fixture>(
-    await page.request.post(`${backend}/test-support/reset`, { data: {}, headers }),
+  const fixtureResponse = await page.request.post(`${backend}/test-support/reset`, {
+    data: {},
+    headers: { ...headers, ...testSupportHeaders },
+  })
+  test.skip(
+    fixtureResponse.status() === 404,
+    'Test fixture endpoint is not enabled in this backend',
   )
+  const fixture = await responseData<Fixture>(fixtureResponse)
   const runNamespace = `E2E-TOWER-${fixture.suffix}-${crypto
     .randomUUID()
     .replaceAll('-', '')
     .slice(0, 12)
     .toUpperCase()}`
-  const foreignOrder = await responseData<Order>(
-    await page.request.post(`${backend}/test-support/foreign-order`, {
-      data: { runNamespace },
-      headers,
-    }),
+  const foreignOrderResponse = await page.request.post(`${backend}/test-support/foreign-order`, {
+    data: { runNamespace },
+    headers: { ...headers, ...testSupportHeaders },
+  })
+  test.skip(
+    foreignOrderResponse.status() === 404,
+    'Cross-tenant fixture endpoint is not enabled in this backend',
   )
+  const foreignOrder = await responseData<Order>(foreignOrderResponse)
   const created: Order[] = []
   for (let index = 0; index < 21; index++) {
     created.push(

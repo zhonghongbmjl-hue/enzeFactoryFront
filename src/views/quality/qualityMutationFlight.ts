@@ -1,4 +1,10 @@
 import { readonly, shallowRef, type DeepReadonly, type Ref } from 'vue'
+import {
+  addDecimal,
+  compareDecimal,
+  isNonNegativeDecimal,
+  isPositiveDecimal,
+} from '@/utils/decimal'
 import type { IdempotencyAttempt } from '@/api/http'
 import { registerTenantCache } from '@/stores/tenantCache'
 import type {
@@ -57,7 +63,6 @@ interface StoredQualityMutationFlight {
 
 export const qualityMutationStorageKey = 'garment.tenant.quality-mutation-flight'
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
-const DECIMAL_PATTERN = /^(?:0|[1-9]\d{0,11})\.\d{6}$/
 const IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9-]{16,128}$/
 const DEFECT_CODE_PATTERN = /^[A-Z0-9][A-Z0-9._:-]{0,119}$/
 const currentFlight = shallowRef<QualityMutationFlight | null>(null)
@@ -80,10 +85,7 @@ function validUuid(value: unknown): value is string {
   return typeof value === 'string' && UUID_PATTERN.test(value)
 }
 function validDecimal(value: unknown): value is string {
-  return typeof value === 'string' && DECIMAL_PATTERN.test(value)
-}
-function decimalUnits(value: string): bigint {
-  return BigInt(value.replace('.', ''))
+  return isNonNegativeDecimal(value)
 }
 function containsControlCharacter(value: string): boolean {
   return Array.from(value).some((character) => {
@@ -150,7 +152,7 @@ function validRequest(value: unknown, sourceWorkOrderId: string): value is Quali
       payload.workOrderId === sourceWorkOrderId &&
       validUuid(payload.workOrderId) &&
       validDecimal(payload.quantity) &&
-      decimalUnits(payload.quantity) > 0n
+      isPositiveDecimal(payload.quantity)
     )
   }
   if (request.name === 'inspection') {
@@ -177,11 +179,15 @@ function validRequest(value: unknown, sourceWorkOrderId: string): value is Quali
       !validText(payload.disposition, 500)
     )
       return false
-    const submitted = decimalUnits(payload.submittedQuantity)
-    const passed = decimalUnits(payload.passedQuantity)
-    const failed = decimalUnits(payload.failedQuantity)
-    if (submitted <= 0n || submitted !== passed + failed) return false
-    return failed > 0n
+    if (
+      !isPositiveDecimal(payload.submittedQuantity) ||
+      compareDecimal(
+        payload.submittedQuantity,
+        addDecimal(payload.passedQuantity, payload.failedQuantity),
+      ) !== 0
+    )
+      return false
+    return isPositiveDecimal(payload.failedQuantity)
       ? typeof payload.defectCode === 'string' && DEFECT_CODE_PATTERN.test(payload.defectCode)
       : payload.defectCode === undefined
   }
@@ -192,7 +198,7 @@ function validRequest(value: unknown, sourceWorkOrderId: string): value is Quali
       exactKeys(payload, ['passedQuantity', 'failedQuantity', 'disposition']) &&
       validDecimal(payload.passedQuantity) &&
       validDecimal(payload.failedQuantity) &&
-      decimalUnits(payload.passedQuantity) + decimalUnits(payload.failedQuantity) > 0n &&
+      isPositiveDecimal(addDecimal(payload.passedQuantity, payload.failedQuantity)) &&
       validText(payload.disposition, 500)
     )
   }

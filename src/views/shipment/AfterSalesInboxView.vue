@@ -12,6 +12,7 @@ import type {
   ExceptionEvidenceType,
   Page,
 } from '@/types/shipment'
+import { isPositiveDecimal } from '@/utils/decimal'
 import {
   useShipmentMutationFlight,
   type ShipmentMutationFlight,
@@ -41,7 +42,6 @@ const owner = Symbol('after-sales-inbox')
 let active = true
 let sequence = 0
 
-const decimalPattern = /^(?:0|[1-9]\d{0,11})\.\d{6}$/
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const canManage = computed(() => auth.permissions.has('AFTER_SALES_MANAGE'))
 
@@ -160,10 +160,9 @@ function openException(): void {
     !uuidPattern.test(orderId.value) ||
     invalidText(referenceNo.value, 80) ||
     invalidText(description.value, 500) ||
-    !decimalPattern.test(affectedQuantity.value) ||
-    affectedQuantity.value === '0.000000'
+    !isPositiveDecimal(affectedQuantity.value)
   ) {
-    error.value = '订单、编号、说明或数量格式无效（数量须为 6 位小数）'
+    error.value = '订单、编号、说明或数量格式无效（数量须大于零）'
     return
   }
   void mutate(orderId.value, {

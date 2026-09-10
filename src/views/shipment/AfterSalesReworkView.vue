@@ -12,6 +12,7 @@ import type {
   EffectiveAfterSalesAction,
   AfterSalesTransitionInput,
 } from '@/types/shipment'
+import { isNonNegativeDecimal, isPositiveDecimal } from '@/utils/decimal'
 import {
   useShipmentMutationFlight,
   type ShipmentMutationFlight,
@@ -155,12 +156,11 @@ function transition(): void {
   }
   if (target.action === 'rework/start') {
     if (
-      !/^(?:0|[1-9]\d{0,11})\.\d{6}$/.test(reworkQuantity.value) ||
-      reworkQuantity.value === '0.000000' ||
+      !isPositiveDecimal(reworkQuantity.value) ||
       !workNote.value.trim() ||
       workNote.value.length > 500
     ) {
-      error.value = '返工数量须为大于零的 6 位小数，并填写返工说明'
+      error.value = '返工数量须大于零，并填写返工说明'
       return
     }
     payload.quantity = reworkQuantity.value as `${number}.${number}`
@@ -168,15 +168,14 @@ function transition(): void {
   }
   if (target.action === 'inspect') {
     if (
-      !/^(?:0|[1-9]\d{0,11})\.\d{6}$/.test(submittedQuantity.value) ||
-      !/^(?:0|[1-9]\d{0,11})\.\d{6}$/.test(passedQuantity.value) ||
-      !/^(?:0|[1-9]\d{0,11})\.\d{6}$/.test(failedQuantity.value) ||
-      submittedQuantity.value === '0.000000' ||
+      !isPositiveDecimal(submittedQuantity.value) ||
+      !isNonNegativeDecimal(passedQuantity.value) ||
+      !isNonNegativeDecimal(failedQuantity.value) ||
       defectCode.value.length > 120 ||
       !disposition.value.trim() ||
       disposition.value.length > 500
     ) {
-      error.value = '复检数量须为 6 位小数，并填写处置结论'
+      error.value = '复检数量格式无效，或未填写处置结论'
       return
     }
     payload.method = inspectionMethod.value
@@ -196,7 +195,7 @@ function transition(): void {
   if (target.action === 'disposition/approve') {
     if (
       !current.currentDisposition ||
-      !/^(?:0|[1-9]\d{0,11})\.\d{6}$/.test(dispositionQuantity.value) ||
+      !isNonNegativeDecimal(dispositionQuantity.value) ||
       !decisionReason.value.trim() ||
       decisionReason.value.length > 500 ||
       !evidenceRef.value.trim() ||

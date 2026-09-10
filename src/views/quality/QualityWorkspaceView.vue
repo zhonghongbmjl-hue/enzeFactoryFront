@@ -1,10 +1,20 @@
 <script setup lang="ts">
 import SelectField from '@/components/form/SelectField.vue'
-import { computed, onUnmounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { qualityApi } from '@/api/quality'
+import { salesOrderApi } from '@/api/orders'
 import { createIdempotencyAttempt } from '@/api/http'
 import { useAuthStore } from '@/stores/auth'
+import { ORDER_STATUS_LABELS, type SalesOrder } from '@/types/order'
+import {
+  addDecimal,
+  compareDecimal,
+  isNonNegativeDecimal,
+  isPositiveDecimal,
+  normalizeDecimalInput,
+} from '@/utils/decimal'
 import type {
   InspectionMethod,
   OrderQualityFacts,
@@ -20,6 +30,9 @@ import {
 } from './qualityMutationFlight'
 
 const salesOrderId = ref('')
+const salesOrders = ref<SalesOrder[]>([])
+const orderLookupLoading = ref(false)
+const orderLookupError = ref('')
 const orderFacts = ref<OrderQualityFacts | null>(null)
 const selectedWorkOrderId = ref('')
 const facts = ref<QualityAggregate | null>(null)
@@ -52,6 +65,8 @@ const inspectionAttempt = createIdempotencyAttempt()
 const reworkAttempt = createIdempotencyAttempt()
 const legacyBridgeAttempt = createIdempotencyAttempt()
 const auth = useAuthStore()
+const route = useRoute()
+const router = useRouter()
 const flightStore = useQualityMutationFlight()
 const componentOwner = Symbol('quality-workspace')
 flightStore.activate(componentOwner)
@@ -72,9 +87,27 @@ const recoveredFlight = initialMutationScope
   : null
 const mutationFlight = flightStore.flight
 const mutationBusy = computed(() => mutationFlight.value !== null)
+const salesOrderOptions = computed(() => {
+  const options = salesOrders.value.map((order) => ({
+    value: order.id,
+    label: `${order.orderNo} · ${order.customerName} · ${ORDER_STATUS_LABELS[order.status]}`,
+  }))
+  if (
+    orderFacts.value &&
+    !options.some((option) => option.value === orderFacts.value?.salesOrderId)
+  ) {
+    options.unshift({
+      value: orderFacts.value.salesOrderId,
+      label: `${orderFacts.value.orderNo} · 当前质量订单`,
+    })
+  }
+  return options
+})
 const confirmationRetryBusy = ref(false)
 const refreshFailure = ref(false)
 const refreshInProgressKey = ref('')
+let orderLookupSequence = 0
+let orderSearchTimer: ReturnType<typeof setTimeout> | null = null
 if (recoveredFlight) salesOrderId.value = recoveredFlight.sourceSalesOrderId
 
 const pendingReworks = computed(
@@ -111,6 +144,23 @@ function pendingSourceMessage(flight: QualityMutationFlight, prefix: string): st
   return `${prefix} · 来源订单 ${flight.sourceSalesOrderId} · 来源工单 ${flight.sourceWorkOrderId}${
     flight.resultId ? ` · 结果 ${flight.resultId}` : ''
   }`
+}
+
+function normalizedQuantity(value: string, label: string, positive: boolean): string | null {
+  try {
+    const normalized = normalizeDecimalInput(value)
+    if (
+      (positive && !isPositiveDecimal(normalized)) ||
+      (!positive && !isNonNegativeDecimal(normalized))
+    ) {
+      ElMessage.error(`${label}${positive ? '必须大于 0' : '不能小于 0'}`)
+      return null
+    }
+    return normalized
+  } catch {
+    ElMessage.error(`${label}必须是最多 12 位整数的数值`)
+    return null
+  }
 }
 
 function successText(name: QualityMutationName, synchronized: boolean): string {
@@ -181,17 +231,84 @@ function clearReadableFacts(): void {
 async function loadFacts(): Promise<boolean> {
   const requested = salesOrderId.value.trim()
   if (!requested || mutationBusy.value) return false
+  void router.replace({ name: 'quality', query: { salesOrderId: requested } })
   return readFacts(requested)
+}
+
+async function loadOrderOptions(query = ''): Promise<void> {
+  const sequence = ++orderLookupSequence
+  orderLookupLoading.value = true
+  orderLookupError.value = ''
+  try {
+    const response = await salesOrderApi.list({
+      page: 0,
+      size: 50,
+      ...(query.trim() ? { query: query.trim() } : {}),
+    })
+    if (sequence === orderLookupSequence) salesOrders.value = response.content
+  } catch {
+    if (sequence === orderLookupSequence) {
+      salesOrders.value = []
+      orderLookupError.value = '销售订单选项加载失败，请重试'
+    }
+  } finally {
+    if (sequence === orderLookupSequence) orderLookupLoading.value = false
+  }
+}
+
+function searchOrders(query: string): void {
+  if (orderSearchTimer) clearTimeout(orderSearchTimer)
+  orderSearchTimer = setTimeout(() => void loadOrderOptions(query), 250)
+}
+
+function routeQueryValue(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+async function readWorkOrderContext(workOrderId: string): Promise<void> {
+  const sequence = ++loadSequence
+  loading.value = true
+  errorMessage.value = ''
+  try {
+    const detail = await qualityApi.aggregate(workOrderId)
+    if (!componentActive || sequence !== loadSequence) return
+    salesOrderId.value = detail.salesOrderId
+    await readFacts(detail.salesOrderId, workOrderId, null, detail)
+  } catch (error) {
+    if (componentActive && sequence === loadSequence) {
+      errorMessage.value = error instanceof Error ? error.message : '工单质量事实加载失败'
+    }
+  } finally {
+    if (componentActive && sequence === loadSequence) loading.value = false
+  }
+}
+
+async function initializePage(): Promise<void> {
+  void loadOrderOptions()
+  if (mutationFlight.value) return
+  const workOrderId = routeQueryValue(route.query.workOrderId)
+  if (workOrderId) {
+    await readWorkOrderContext(workOrderId)
+    return
+  }
+  const requested = routeQueryValue(route.query.salesOrderId)
+  if (!requested) return
+  salesOrderId.value = requested
+  await readFacts(requested)
 }
 
 async function readFacts(
   requested: string,
   preferredWorkOrderId = '',
   flight: QualityMutationFlight | null = null,
+  preloadedDetail: QualityAggregate | null = null,
 ): Promise<boolean> {
   const sequence = ++loadSequence
+  const previousOrderId = orderFacts.value?.salesOrderId ?? ''
+  const previousWorkOrderId = facts.value?.workOrderId ?? ''
+  const preserveCurrentFacts = previousOrderId === requested
   if (flight) salesOrderId.value = flight.sourceSalesOrderId
-  clearReadableFacts()
+  if (!preserveCurrentFacts) clearReadableFacts()
   loading.value = true
   errorMessage.value = ''
   try {
@@ -206,7 +323,15 @@ async function readFacts(
       ? preferredWorkOrderId
       : (available[0]?.workOrderId ?? '')
     const selected = selectedWorkOrderId.value
-    const detail = selected ? await qualityApi.aggregate(selected) : null
+    if (selected !== previousWorkOrderId) {
+      facts.value = null
+      selectedReworkId.value = ''
+    }
+    const detail = selected
+      ? preloadedDetail?.workOrderId === selected
+        ? preloadedDetail
+        : await qualityApi.aggregate(selected)
+      : null
     if (!isCurrentRead(sequence, requested, flight)) return false
     if (flight) salesOrderId.value = flight.sourceSalesOrderId
     facts.value = detail
@@ -216,7 +341,7 @@ async function readFacts(
     return true
   } catch (error) {
     if (isCurrentRead(sequence, requested, flight)) {
-      facts.value = null
+      if (!preserveCurrentFacts) facts.value = null
       errorMessage.value = error instanceof Error ? error.message : '质量事实加载失败'
     }
     return false
@@ -346,7 +471,10 @@ async function retryQualityMutation(): Promise<void> {
 
 async function submitTrimming(): Promise<void> {
   if (trimBusy.value || mutationBusy.value || !facts.value || !orderFacts.value) return
-  const payload = { workOrderId: facts.value.workOrderId, quantity: trimQuantity.value }
+  const quantity = normalizedQuantity(trimQuantity.value, '后整数量', true)
+  if (!quantity) return
+  trimQuantity.value = quantity
+  const payload = { workOrderId: facts.value.workOrderId, quantity }
   const flight = beginMutation({ name: 'trimming', payload }, trimAttempt, payload)
   if (!flight) return
   trimBusy.value = true
@@ -362,13 +490,28 @@ async function submitTrimming(): Promise<void> {
 
 async function submitInspection(): Promise<void> {
   if (inspectionBusy.value || mutationBusy.value || !facts.value || !orderFacts.value) return
+  const submitted = normalizedQuantity(submittedQuantity.value, '提交数量', true)
+  const passed = normalizedQuantity(passedQuantity.value, '通过数量', false)
+  const failed = normalizedQuantity(failedQuantity.value, '失败数量', false)
+  if (!submitted || !passed || !failed) return
+  if (compareDecimal(submitted, addDecimal(passed, failed)) !== 0) {
+    ElMessage.error('提交数量必须等于通过数量加失败数量')
+    return
+  }
   const normalizedDefectCode = defectCode.value.trim().toUpperCase()
+  if (isPositiveDecimal(failed) && !normalizedDefectCode) {
+    ElMessage.error('存在失败数量时必须填写缺陷代码')
+    return
+  }
+  submittedQuantity.value = submitted
+  passedQuantity.value = passed
+  failedQuantity.value = failed
   const payload = {
     workOrderId: facts.value.workOrderId,
     inspectionMethod: inspectionMethod.value,
-    submittedQuantity: submittedQuantity.value,
-    passedQuantity: passedQuantity.value,
-    failedQuantity: failedQuantity.value,
+    submittedQuantity: submitted,
+    passedQuantity: passed,
+    failedQuantity: failed,
     ...(normalizedDefectCode ? { defectCode: normalizedDefectCode } : {}),
     disposition: disposition.value,
   }
@@ -396,9 +539,18 @@ async function completeRework(): Promise<void> {
   )
     return
   const reworkId = selectedRework.value.id
+  const passed = normalizedQuantity(reworkPassedQuantity.value, '回检通过数量', false)
+  const failed = normalizedQuantity(reworkFailedQuantity.value, '再次失败数量', false)
+  if (!passed || !failed) return
+  if (!isPositiveDecimal(addDecimal(passed, failed))) {
+    ElMessage.error('回检通过数量和再次失败数量之和必须大于 0')
+    return
+  }
+  reworkPassedQuantity.value = passed
+  reworkFailedQuantity.value = failed
   const payload: ReworkCompletionInput = {
-    passedQuantity: reworkPassedQuantity.value,
-    failedQuantity: reworkFailedQuantity.value,
+    passedQuantity: passed,
+    failedQuantity: failed,
     disposition: reworkDisposition.value,
   }
   const fingerprint = { reworkId, ...payload }
@@ -469,10 +621,14 @@ watch(
 
 onUnmounted(() => {
   componentActive = false
+  if (orderSearchTimer) clearTimeout(orderSearchTimer)
+  ++orderLookupSequence
   flightStore.releaseRefresh(componentOwner)
   flightStore.deactivate(componentOwner)
   ++loadSequence
 })
+
+onMounted(initializePage)
 </script>
 
 <template>
@@ -484,13 +640,22 @@ onUnmounted(() => {
       </div>
       <el-form data-testid="load-quality" class="lookup" @submit.prevent="loadFacts">
         <label
-          >销售订单 ID
-          <el-input
+          >选择销售订单
+          <SelectField
             v-model="salesOrderId"
             name="salesOrderId"
-            autocomplete="off"
+            placeholder="搜索订单号 / 客户"
+            filterable
+            remote
+            reserve-keyword
+            :remote-method="searchOrders"
+            :loading="orderLookupLoading"
+            :options="salesOrderOptions"
             :disabled="mutationBusy"
           />
+          <small v-if="orderLookupError" class="lookup-error" role="alert">{{
+            orderLookupError
+          }}</small>
         </label>
         <el-button type="primary" native-type="submit" :disabled="loading || mutationBusy">
           {{ loading ? '读取中…' : '读取质量事实' }}
@@ -620,8 +785,9 @@ onUnmounted(() => {
           <el-button
             data-testid="trim-submit"
             type="primary"
-            native-type="submit"
+            native-type="button"
             :disabled="trimBusy || mutationBusy"
+            @click="submitTrimming"
           >
             {{ trimBusy ? '处理中…' : '确认后整' }}
           </el-button>
@@ -874,8 +1040,12 @@ onUnmounted(() => {
   font-size: 12px;
   font-weight: 700;
 }
-.lookup .el-input {
+.lookup .el-select {
   min-width: min(300px, 100%);
+}
+.lookup-error {
+  color: #9e351c;
+  font-weight: 600;
 }
 .quality-workspace button {
   border: 0;

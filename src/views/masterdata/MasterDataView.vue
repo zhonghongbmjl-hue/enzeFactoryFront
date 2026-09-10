@@ -429,13 +429,7 @@ defineExpose({ openCreate, openEdit, save, toggle })
             <el-input id="md-category" v-model="form.category" maxlength="32" />
           </el-form-item>
           <el-form-item label="小数位">
-            <el-input
-              id="md-scale"
-              v-model.number="form.decimalScale"
-              type="number"
-              min="0"
-              max="6"
-            />
+            <el-input id="md-scale" v-model.number="form.decimalScale" type="number" min="0" />
           </el-form-item>
         </template>
         <template v-if="activeType === 'materials'">

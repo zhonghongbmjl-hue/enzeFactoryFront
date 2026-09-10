@@ -1,11 +1,18 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import SelectField from '@/components/form/SelectField.vue'
+import { computed, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { cuttingApi } from '@/api/cutting'
 import { kittingApi } from '@/api/kitting'
+import { inventoryApi } from '@/api/inventory'
+import { salesOrderApi } from '@/api/orders'
 import { createIdempotencyAttempt } from '@/api/http'
 import type { CuttingOrder, KittingCheck, KittingRelease } from '@/types/cutting'
+import type { InventoryLedger } from '@/types/inventory'
+import type { SalesOrder, SalesOrderItem } from '@/types/order'
 import { addDecimal, compareDecimal, decimalPercent, isPositiveDecimal } from '@/utils/decimal'
+
+const CLOSED_ORDER_STATUSES = new Set(['DRAFT', 'CANCELLED', 'COMPLETED'])
 
 const cuttingQuery = ref('')
 const kittingQuery = ref('')
@@ -18,6 +25,8 @@ const scheduleReferences = ref<Record<string, string>>({})
 const pending = ref(false)
 const failure = ref('')
 const traceId = ref('')
+const orders = ref<SalesOrder[]>([])
+const issues = ref<Array<{ id: string; issueNo: string; batchNo: string }>>([])
 const conservationOk = computed(
   () =>
     !cutting.value ||
@@ -51,6 +60,161 @@ const createAttempt = createIdempotencyAttempt()
 const completeAttempt = createIdempotencyAttempt()
 const releaseAttempt = createIdempotencyAttempt()
 const scheduleAttempt = createIdempotencyAttempt()
+const orderItems = computed(() => orders.value.flatMap((order) => order.items ?? []))
+const orderItemOptions = computed(() =>
+  orders.value.flatMap((order) =>
+    (order.items ?? []).map((item) => ({
+      label: orderItemLabel(order, item),
+      value: item.id,
+    })),
+  ),
+)
+const skuOptions = computed(() => skuChoices(createForm.value.orderItemId))
+const checkSkuOptions = computed(() => skuChoices(checkForm.value.orderItemId))
+const issueOptions = computed(() =>
+  issues.value.map((issue) => ({
+    label: `${issue.issueNo} · ${issue.batchNo || '无批次'}`,
+    value: issue.id,
+  })),
+)
+
+function orderItemLabel(order: SalesOrder, item: SalesOrderItem): string {
+  return `${order.orderNo} · ${item.color} / ${item.size} / ${item.fit}`
+}
+
+function skuLabel(item: SalesOrderItem): string {
+  return `${item.color} / ${item.size} / ${item.fit}`
+}
+
+function skuChoices(orderItemId: string) {
+  const scoped = orderItemId
+    ? orderItems.value.filter((item) => item.id === orderItemId)
+    : orderItems.value
+  const seen = new Set<string>()
+  return scoped
+    .filter((item) => {
+      if (seen.has(item.skuId)) return false
+      seen.add(item.skuId)
+      return true
+    })
+    .map((item) => ({
+      label: skuLabel(item),
+      value: item.skuId,
+    }))
+}
+
+function findOrderItemMatch(
+  orderItemId: string,
+): { order: SalesOrder; item: SalesOrderItem } | undefined {
+  for (const order of orders.value) {
+    const item = (order.items ?? []).find((row) => row.id === orderItemId)
+    if (item) return { order, item }
+  }
+  return undefined
+}
+
+function formatOrderItemId(orderItemId: string): string {
+  const match = findOrderItemMatch(orderItemId)
+  return match ? orderItemLabel(match.order, match.item) : orderItemId
+}
+
+function formatSkuId(skuId: string): string {
+  const item = orderItems.value.find((row) => row.skuId === skuId)
+  return item ? skuLabel(item) : skuId
+}
+
+function findOrderItem(orderItemId: string): SalesOrderItem | undefined {
+  return findOrderItemMatch(orderItemId)?.item
+}
+
+function applyOrderItem(orderItemId: string): void {
+  const item = findOrderItem(orderItemId)
+  if (item) createForm.value.skuId = item.skuId
+}
+
+function onCheckOrderItemChange(orderItemId: string): void {
+  const item = findOrderItem(orderItemId)
+  checkForm.value.skuId = item?.skuId ?? ''
+}
+
+function fabricMaterialIds(order: SalesOrder, orderItemId: string): string[] {
+  const fromRequirements = (order.requirements ?? [])
+    .filter((row) => row.orderItemId === orderItemId && row.materialType === 'FABRIC')
+    .map((row) => row.materialId)
+  const fromBom = (order.bomSnapshots ?? [])
+    .filter((row) => row.orderItemId === orderItemId)
+    .flatMap((row) =>
+      row.items.filter((item) => item.materialType === 'FABRIC').map((item) => item.materialId),
+    )
+  return [...new Set([...fromRequirements, ...fromBom])]
+}
+
+function issueChoicesFromLedgers(ledgers: InventoryLedger[]): Array<{
+  id: string
+  issueNo: string
+  batchNo: string
+}> {
+  const unique = new Map<string, { id: string; issueNo: string; batchNo: string }>()
+  for (const ledger of ledgers) {
+    if (ledger.eventType !== 'MATERIAL_ISSUED' || !ledger.materialIssueId) continue
+    if (unique.has(ledger.materialIssueId)) continue
+    unique.set(ledger.materialIssueId, {
+      id: ledger.materialIssueId,
+      issueNo: ledger.businessReference || ledger.materialIssueId,
+      batchNo: ledger.batchNo,
+    })
+  }
+  return [...unique.values()]
+}
+
+async function loadIssues(orderItemId: string): Promise<void> {
+  if (!orderItemId) {
+    issues.value = []
+    return
+  }
+  try {
+    const match = findOrderItemMatch(orderItemId)
+    if (!match) {
+      issues.value = []
+      return
+    }
+    let order = match.order
+    if (!(order.requirements?.length || order.bomSnapshots?.length)) {
+      order = await salesOrderApi.get(order.id)
+    }
+    const materialIds = fabricMaterialIds(order, orderItemId)
+    if (!materialIds.length) {
+      issues.value = []
+      return
+    }
+    const ledgers = (await Promise.all(materialIds.map((id) => inventoryApi.ledgers(id)))).flat()
+    issues.value = issueChoicesFromLedgers(ledgers)
+  } catch (error) {
+    issues.value = []
+    report(error, '领料选项加载失败')
+  }
+}
+
+async function onOrderItemChange(orderItemId: string): Promise<void> {
+  applyOrderItem(orderItemId)
+  createForm.value.materialIssueId = ''
+  await loadIssues(orderItemId)
+}
+
+function onIssueChange(issueId: string): void {
+  const issue = issues.value.find((item) => item.id === issueId)
+  if (!issue) return
+  if (issue.batchNo) createForm.value.sourceFabricLot = issue.batchNo
+}
+
+async function loadCuttingOptions(): Promise<void> {
+  try {
+    const orderPage = await salesOrderApi.list({ page: 0, size: 50 })
+    orders.value = orderPage.content.filter((order) => !CLOSED_ORDER_STATUSES.has(order.status))
+  } catch (error) {
+    report(error, '裁剪选项加载失败')
+  }
+}
 
 async function createCutting(): Promise<void> {
   if (pending.value || !isPositiveDecimal(createForm.value.inputQuantity)) return
@@ -99,7 +263,7 @@ async function completeCutting(): Promise<void> {
 }
 
 async function createKitting(): Promise<void> {
-  if (pending.value) return
+  if (pending.value || !checkForm.value.orderItemId || !checkForm.value.skuId) return
   pending.value = true
   failure.value = ''
   try {
@@ -195,6 +359,8 @@ async function scheduleKitting(item: KittingRelease): Promise<void> {
     pending.value = false
   }
 }
+
+onMounted(loadCuttingOptions)
 </script>
 
 <template>
@@ -239,9 +405,41 @@ async function scheduleKitting(item: KittingRelease): Promise<void> {
           <h3>创建裁剪任务</h3>
           <div class="compact-fields">
             <label>裁剪单号<el-input v-model="createForm.cuttingNo" required /></label>
-            <label>领料 ID<el-input v-model="createForm.materialIssueId" required /></label>
-            <label>订单项 ID<el-input v-model="createForm.orderItemId" required /></label>
-            <label>SKU ID<el-input v-model="createForm.skuId" required /></label>
+            <label>
+              订单项
+              <SelectField
+                v-model="createForm.orderItemId"
+                data-testid="cutting-order-item"
+                aria-label="订单项"
+                placeholder="选择订单项"
+                filterable
+                :options="orderItemOptions"
+                @change="onOrderItemChange(String($event ?? ''))"
+              />
+            </label>
+            <label>
+              SKU
+              <SelectField
+                v-model="createForm.skuId"
+                data-testid="cutting-sku"
+                aria-label="SKU"
+                placeholder="选择SKU"
+                filterable
+                :options="skuOptions"
+              />
+            </label>
+            <label>
+              领料单
+              <SelectField
+                v-model="createForm.materialIssueId"
+                data-testid="cutting-material-issue"
+                aria-label="领料单"
+                placeholder="请先选择订单项"
+                filterable
+                :options="issueOptions"
+                @change="onIssueChange(String($event ?? ''))"
+              />
+            </label>
             <label>生产批次<el-input v-model="createForm.productionBatch" required /></label>
             <label>来源布批<el-input v-model="createForm.sourceFabricLot" required /></label>
             <label
@@ -288,15 +486,11 @@ async function scheduleKitting(item: KittingRelease): Promise<void> {
           <dl class="trace-grid">
             <div>
               <dt>订单项</dt>
-              <dd>
-                <code>{{ cutting.orderItemId }}</code>
-              </dd>
+              <dd>{{ formatOrderItemId(cutting.orderItemId) }}</dd>
             </div>
             <div>
               <dt>SKU</dt>
-              <dd>
-                <code>{{ cutting.skuId }}</code>
-              </dd>
+              <dd>{{ formatSkuId(cutting.skuId) }}</dd>
             </div>
             <div>
               <dt>生产批次</dt>
@@ -416,10 +610,37 @@ async function scheduleKitting(item: KittingRelease): Promise<void> {
         >
           <h3>按实绩检查齐套</h3>
           <div class="compact-fields">
-            <label>订单项 ID<el-input v-model="checkForm.orderItemId" required /></label>
-            <label>SKU ID<el-input v-model="checkForm.skuId" required /></label>
+            <label>
+              订单项
+              <SelectField
+                v-model="checkForm.orderItemId"
+                data-testid="kitting-order-item"
+                aria-label="订单项"
+                placeholder="选择订单项"
+                filterable
+                :options="orderItemOptions"
+                @change="onCheckOrderItemChange(String($event ?? ''))"
+              />
+            </label>
+            <label>
+              SKU
+              <SelectField
+                v-model="checkForm.skuId"
+                data-testid="kitting-sku"
+                aria-label="SKU"
+                placeholder="选择SKU"
+                filterable
+                :options="checkSkuOptions"
+              />
+            </label>
           </div>
-          <el-button type="primary" native-type="submit" :disabled="pending">重算齐套</el-button>
+          <el-button
+            type="primary"
+            native-type="submit"
+            :disabled="pending || !checkForm.orderItemId || !checkForm.skuId"
+          >
+            重算齐套
+          </el-button>
         </el-form>
         <el-form class="query-strip" @submit.prevent="loadKitting">
           <label
@@ -469,9 +690,9 @@ async function scheduleKitting(item: KittingRelease): Promise<void> {
               <el-input
                 v-model="releaseQuantity"
                 inputmode="decimal"
-                min="0.000001"
+                min="0"
                 :max="kitting.remainingQuantity"
-                step="0.000001"
+                step="any"
               />
             </label>
             <el-button
@@ -633,8 +854,10 @@ async function scheduleKitting(item: KittingRelease): Promise<void> {
   gap: 8px;
 }
 .compact-fields .el-input,
+.compact-fields .el-select,
 .bundle-entry .el-input {
   min-width: 0;
+  width: 100%;
 }
 .bundle-entry {
   display: grid;

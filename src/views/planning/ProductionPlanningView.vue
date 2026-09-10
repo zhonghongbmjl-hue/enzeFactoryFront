@@ -1,10 +1,22 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import SelectField from '@/components/form/SelectField.vue'
+import { computed, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
+import { useRoute, useRouter } from 'vue-router'
+import { kittingApi } from '@/api/kitting'
+import { masterDataApi } from '@/api/masterdata'
+import { salesOrderApi } from '@/api/orders'
 import { planningApi } from '@/api/planning'
 import { createIdempotencyAttempt } from '@/api/http'
+import type { KittingRelease } from '@/types/cutting'
+import type { MasterDataRecord } from '@/types/masterdata'
+import type { SalesOrder, SalesOrderItem } from '@/types/order'
 import type { CreateProductionPlanInput, ProductionPlan } from '@/types/planning'
 import { isPositiveDecimal } from '@/utils/decimal'
+
+const CLOSED_ORDER_STATUSES = new Set(['DRAFT', 'CANCELLED', 'COMPLETED'])
+const route = useRoute()
+const router = useRouter()
 
 const form = ref<CreateProductionPlanInput>({
   orderId: '',
@@ -20,13 +32,53 @@ const form = ref<CreateProductionPlanInput>({
   plannedBatchCode: '',
 })
 const plan = ref<ProductionPlan>()
-const query = ref('')
+const orders = ref<SalesOrder[]>([])
+const factories = ref<MasterDataRecord[]>([])
+const workshops = ref<MasterDataRecord[]>([])
+const productionLines = ref<MasterDataRecord[]>([])
+const releases = ref<KittingRelease[]>([])
+const routePlanId = route.query?.productionPlanId
+const query = ref(typeof routePlanId === 'string' ? routePlanId.trim() : '')
 const pending = ref(false)
 const failure = ref('')
 const traceId = ref('')
 let requestSequence = 0
+let releaseRequestGeneration = 0
 const attempt = createIdempotencyAttempt()
 const schedule = computed(() => plan.value?.items[0]?.schedule)
+const selectedOrder = computed(() => orders.value.find((order) => order.id === form.value.orderId))
+const selectedOrderItem = computed(() =>
+  (selectedOrder.value?.items ?? []).find((item) => item.id === form.value.orderItemId),
+)
+const orderOptions = computed(() =>
+  orders.value.map((order) => ({
+    label: order.orderNo,
+    value: order.id,
+  })),
+)
+const orderItemOptions = computed(() =>
+  (selectedOrder.value?.items ?? []).map((item) => ({
+    label: orderItemLabel(item),
+    value: item.id,
+  })),
+)
+const skuOptions = computed(() => {
+  const item = selectedOrderItem.value
+  return item ? [{ label: skuLabel(item), value: item.skuId }] : []
+})
+const factoryOptions = computed(() => namedOptions(factories.value))
+const workshopOptions = computed(() =>
+  namedOptions(workshops.value.filter((item) => item.parentId === form.value.factoryId)),
+)
+const productionLineOptions = computed(() =>
+  namedOptions(productionLines.value.filter((item) => item.parentId === form.value.workshopId)),
+)
+const releaseOptions = computed(() =>
+  releases.value.map((item) => ({
+    label: `可排产 ${item.remainingForScheduling} · 已释放 ${item.quantity}`,
+    value: item.id,
+  })),
+)
 const readyToSubmit = computed(
   () =>
     isPositiveDecimal(form.value.quantity) &&
@@ -45,10 +97,119 @@ const readyToSubmit = computed(
     form.value.endDate >= form.value.startDate,
 )
 
+function orderItemLabel(item: SalesOrderItem): string {
+  return `${item.color} / ${item.size} / ${item.fit}`
+}
+
+function skuLabel(item: SalesOrderItem): string {
+  return `${item.color} / ${item.size} / ${item.fit}`
+}
+
+function namedOptions(records: MasterDataRecord[]) {
+  return records.map((item) => ({
+    label: `${item.code} · ${item.name}`,
+    value: item.id,
+  }))
+}
+
+function applySku(): void {
+  form.value.skuId = selectedOrderItem.value?.skuId ?? ''
+}
+
+function applyRelease(releaseId: string): void {
+  const release = releases.value.find((item) => item.id === releaseId)
+  if (!release) return
+  if (!isPositiveDecimal(form.value.quantity)) {
+    form.value.quantity = release.remainingForScheduling
+  }
+}
+
+async function loadReleases(): Promise<void> {
+  const orderItemId = form.value.orderItemId
+  const skuId = form.value.skuId
+  const generation = ++releaseRequestGeneration
+  form.value.kittingReleaseId = ''
+  releases.value = []
+  if (!orderItemId || !skuId) return
+  try {
+    const check = await kittingApi.check({ orderItemId, skuId })
+    const rows = await kittingApi.releases(check.id)
+    if (generation !== releaseRequestGeneration) return
+    releases.value = rows.filter((item) => isPositiveDecimal(item.remainingForScheduling))
+    const [onlyRelease] = releases.value
+    if (releases.value.length === 1 && onlyRelease) {
+      form.value.kittingReleaseId = onlyRelease.id
+      applyRelease(onlyRelease.id)
+    }
+  } catch (error) {
+    if (generation !== releaseRequestGeneration) return
+    releases.value = []
+    report(error, '齐套释放选项加载失败')
+  }
+}
+
+async function onOrderChange(): Promise<void> {
+  if (!selectedOrderItem.value) {
+    form.value.orderItemId = ''
+  }
+  applySku()
+  await loadReleases()
+}
+
+async function onOrderItemChange(): Promise<void> {
+  applySku()
+  await loadReleases()
+}
+
+function onFactoryChange(): void {
+  const workshop = workshops.value.find((item) => item.id === form.value.workshopId)
+  if (!workshop || workshop.parentId !== form.value.factoryId) {
+    form.value.workshopId = ''
+    form.value.productionLineId = ''
+  }
+}
+
+function onWorkshopChange(): void {
+  const line = productionLines.value.find((item) => item.id === form.value.productionLineId)
+  if (!line || line.parentId !== form.value.workshopId) {
+    form.value.productionLineId = ''
+  }
+}
+
+async function loadPlanningOptions(): Promise<void> {
+  try {
+    const [orderPage, factoryPage, workshopPage, linePage] = await Promise.all([
+      salesOrderApi.list({ page: 0, size: 50 }),
+      masterDataApi.list('factories', { page: 0, size: 100, active: true, sort: 'name,asc' }),
+      masterDataApi.list('workshops', { page: 0, size: 100, active: true, sort: 'name,asc' }),
+      masterDataApi.list('production-lines', {
+        page: 0,
+        size: 100,
+        active: true,
+        sort: 'name,asc',
+      }),
+    ])
+    orders.value = orderPage.content.filter((order) => !CLOSED_ORDER_STATUSES.has(order.status))
+    factories.value = factoryPage.content
+    workshops.value = workshopPage.content
+    productionLines.value = linePage.content
+  } catch (error) {
+    report(error, '排产选项加载失败')
+  }
+}
+
 function report(error: unknown, fallback: string): void {
   const candidate = error as { message?: string; traceId?: string }
   failure.value = candidate.message || fallback
   traceId.value = candidate.traceId || ''
+}
+
+function rememberPlanId(id: string): void {
+  const normalized = id.trim()
+  if (!normalized || route.query?.productionPlanId === normalized) return
+  void router.replace({
+    query: { ...route.query, productionPlanId: normalized },
+  })
 }
 
 function createPayload(): CreateProductionPlanInput {
@@ -67,8 +228,9 @@ async function createPlan(): Promise<void> {
     const created = await planningApi.create(payload, attempt.keyFor(payload))
     if (request !== requestSequence || JSON.stringify(createPayload()) !== snapshot) return
     plan.value = created
-    attempt.succeeded()
     query.value = created.id
+    rememberPlanId(created.id)
+    attempt.succeeded()
     ElMessage.success('排产草案已创建，齐套释放量已原子占用')
   } catch (error) {
     attempt.failed(error)
@@ -91,6 +253,7 @@ async function loadPlan(): Promise<void> {
     const loaded = await planningApi.get(requestedPlanId)
     if (request !== requestSequence || query.value.trim() !== requestedPlanId) return
     plan.value = loaded
+    rememberPlanId(loaded.id)
   } catch (error) {
     if (request === requestSequence && query.value.trim() === requestedPlanId) {
       report(error, '排产计划读取失败')
@@ -113,6 +276,11 @@ async function approve(): Promise<void> {
     pending.value = false
   }
 }
+
+onMounted(() => {
+  void loadPlanningOptions()
+  if (query.value) void loadPlan()
+})
 </script>
 
 <template>
@@ -152,62 +320,103 @@ async function approve(): Promise<void> {
         <el-form data-testid="planning-form" class="planning-form" @submit.prevent="createPlan">
           <fieldset :disabled="pending">
             <legend>订单与齐套来源</legend>
-            <label
-              >订单 ID<el-input
-                v-model.trim="form.orderId"
+            <label>
+              订单
+              <SelectField
+                v-model="form.orderId"
                 name="orderId"
-                required
-                autocomplete="off"
-            /></label>
-            <label
-              >订单项 ID
-              <el-input
-                v-model.trim="form.orderItemId"
-                name="orderItemId"
-                required
-                autocomplete="off"
+                data-testid="planning-order"
+                aria-label="订单"
+                placeholder="选择订单"
+                filterable
+                :disabled="pending"
+                :options="orderOptions"
+                @change="onOrderChange"
               />
             </label>
-            <label
-              >SKU ID<el-input v-model.trim="form.skuId" name="skuId" required autocomplete="off"
-            /></label>
-            <label
-              >齐套释放 ID
-              <el-input
-                v-model.trim="form.kittingReleaseId"
+            <label>
+              订单项
+              <SelectField
+                v-model="form.orderItemId"
+                name="orderItemId"
+                data-testid="planning-order-item"
+                aria-label="订单项"
+                placeholder="请先选择订单"
+                filterable
+                :disabled="pending"
+                :options="orderItemOptions"
+                @change="onOrderItemChange"
+              />
+            </label>
+            <label>
+              SKU
+              <SelectField
+                v-model="form.skuId"
+                name="skuId"
+                data-testid="planning-sku"
+                aria-label="SKU"
+                placeholder="请先选择订单项"
+                filterable
+                :disabled="pending"
+                :options="skuOptions"
+              />
+            </label>
+            <label>
+              齐套释放
+              <SelectField
+                v-model="form.kittingReleaseId"
                 name="kittingReleaseId"
-                required
-                autocomplete="off"
+                data-testid="planning-kitting-release"
+                aria-label="齐套释放"
+                placeholder="请先选择订单项"
+                filterable
+                :disabled="pending"
+                :options="releaseOptions"
+                @change="applyRelease(String($event ?? ''))"
               />
             </label>
           </fieldset>
           <fieldset :disabled="pending">
             <legend>生产资源链</legend>
-            <label
-              >工厂 ID
-              <el-input
-                v-model.trim="form.factoryId"
+            <label>
+              工厂
+              <SelectField
+                v-model="form.factoryId"
                 name="factoryId"
-                required
-                autocomplete="off"
+                data-testid="planning-factory"
+                aria-label="工厂"
+                placeholder="选择工厂"
+                filterable
+                :disabled="pending"
+                :options="factoryOptions"
+                @change="onFactoryChange"
               />
             </label>
-            <label
-              >车间 ID
-              <el-input
-                v-model.trim="form.workshopId"
+            <label>
+              车间
+              <SelectField
+                v-model="form.workshopId"
                 name="workshopId"
-                required
-                autocomplete="off"
+                data-testid="planning-workshop"
+                aria-label="车间"
+                placeholder="请先选择工厂"
+                filterable
+                :disabled="pending"
+                :options="workshopOptions"
+                @change="onWorkshopChange"
               />
             </label>
-            <label class="span-two"
-              >产线 ID
-              <el-input
-                v-model.trim="form.productionLineId"
+            <label class="span-two">
+              产线
+              <SelectField
+                v-model="form.productionLineId"
                 name="productionLineId"
-                required
-                autocomplete="off"
+                data-testid="planning-line"
+                aria-label="产线"
+                placeholder="请先选择车间"
+                filterable
+                :disabled="pending"
+                :options="productionLineOptions"
               />
             </label>
           </fieldset>
@@ -270,15 +479,6 @@ async function approve(): Promise<void> {
             <h2>排程签发</h2>
           </div>
         </header>
-        <el-form class="plan-query" @submit.prevent="loadPlan">
-          <el-input
-            v-model="query"
-            aria-label="排产计划 ID"
-            placeholder="输入排产计划 UUID"
-            :disabled="pending"
-          />
-          <el-button type="primary" native-type="submit" :disabled="pending">读取</el-button>
-        </el-form>
         <template v-if="plan && schedule">
           <div class="approval-banner" :class="plan.status.toLowerCase()">
             <small>审批状态</small>
@@ -317,8 +517,18 @@ async function approve(): Promise<void> {
           </dl>
           <aside class="work-order-gate" :class="{ open: plan.status === 'APPROVED' }">
             <b>{{ plan.status === 'APPROVED' ? '工单门已开启' : '仅已审批排程可下推工单' }}</b>
-            <small>Task 12 将只读取 APPROVED 排程。</small>
+            <small>已审批排程可生成一张工单与一个生产批次。</small>
           </aside>
+          <RouterLink
+            v-if="plan.status === 'APPROVED'"
+            class="work-order-action"
+            :to="{
+              name: 'work-orders',
+              query: { productionPlanId: plan.id },
+            }"
+          >
+            前往生成工单
+          </RouterLink>
           <el-button
             v-if="plan.status === 'DRAFT'"
             class="approve-action"
@@ -330,8 +540,10 @@ async function approve(): Promise<void> {
           </el-button>
         </template>
         <div v-else class="empty-schedule">
-          <span>⌁</span><b>等待排程草案</b
-          ><small>左侧创建后，这里会显示审批门与完整生产来源链。</small>
+          <span>⌁</span>
+          <b>{{ pending && query ? '正在恢复排产计划…' : '等待排程草案' }}</b>
+          <small v-if="pending && query">刷新后正在自动读取，无需填写计划ID。</small>
+          <small v-else>在左侧创建草案后，这里会自动显示审批信息。</small>
         </div>
       </article>
     </div>
@@ -446,7 +658,8 @@ async function approve(): Promise<void> {
   font-weight: 800;
 }
 .planning-form .el-input,
-.plan-query .native-control {
+.planning-form .el-select,
+.planning-form .native-control {
   width: 100%;
   min-width: 0;
 }
@@ -467,6 +680,22 @@ async function approve(): Promise<void> {
   box-shadow: 6px 6px 0 #142820;
   cursor: pointer;
 }
+.work-order-action {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 50px;
+  margin-top: 16px;
+  color: #fff;
+  background: #142820;
+  box-shadow: 6px 6px 0 #3c8765;
+  font-weight: 900;
+  text-decoration: none;
+}
+.work-order-action:focus-visible {
+  outline: 3px solid #d25521;
+  outline-offset: 3px;
+}
 .dispatch-action:disabled,
 .approve-action:disabled {
   opacity: 0.48;
@@ -474,17 +703,6 @@ async function approve(): Promise<void> {
 }
 .status-card {
   background: #e7ece3;
-}
-.plan-query {
-  display: flex;
-  margin-bottom: 16px;
-}
-.plan-query button {
-  color: #fff;
-  background: #142820;
-  border: 0;
-  padding: 0 14px;
-  font-weight: 800;
 }
 .approval-banner {
   display: grid;

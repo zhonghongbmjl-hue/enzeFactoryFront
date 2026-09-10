@@ -10,6 +10,7 @@ export default tseslint.config(
     ignores: [
       'dist',
       'coverage',
+      'artifacts',
       'playwright-report',
       'test-results',
       'src/auto-imports.d.ts',
@@ -20,7 +21,7 @@ export default tseslint.config(
   ...tseslint.configs.recommended,
   ...pluginVue.configs['flat/recommended'],
   {
-    files: ['e2e/support/**/*.mjs'],
+    files: ['e2e/support/**/*.mjs', 'scripts/**/*.mjs'],
     languageOptions: { globals: globals.node },
   },
   {

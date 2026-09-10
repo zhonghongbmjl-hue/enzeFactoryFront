@@ -244,6 +244,13 @@ onMounted(load)
         >
           下达产线
         </el-button>
+        <RouterLink
+          v-if="['READY_TO_COMPLETE', 'TRIMMING', 'READY_FOR_QUALITY'].includes(workOrder.status)"
+          class="quality-link"
+          :to="{ name: 'quality', query: { workOrderId: workOrder.id } }"
+        >
+          前往品质闭环
+        </RouterLink>
       </div>
     </header>
 
@@ -431,6 +438,17 @@ button {
   background: #e5b757;
   font-weight: 800;
   cursor: pointer;
+}
+.quality-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 16px;
+  border-radius: 9px;
+  background: #e5b757;
+  color: #182b2c;
+  font-weight: 800;
+  text-decoration: none;
 }
 .timeline {
   display: grid;

@@ -73,11 +73,11 @@ const canStart = computed(
 )
 const needsRecovery = computed(
   () =>
-    !purchaseOrder.value &&
-    props.canManage &&
-    ['ORDERED', 'COMPLETED'].includes(props.plan.status),
+    !purchaseOrder.value && props.canManage && ['ORDERED', 'COMPLETED'].includes(props.plan.status),
 )
-const canOpen = computed(() => canStart.value || needsRecovery.value || Boolean(purchaseOrder.value))
+const canOpen = computed(
+  () => canStart.value || needsRecovery.value || Boolean(purchaseOrder.value),
+)
 const openLabel = computed(() => {
   if (!purchaseOrder.value) {
     return needsRecovery.value ? '继续办理采购与来料' : '办理采购与来料'
@@ -167,7 +167,7 @@ function restoreFlow(): void {
 }
 
 function amount(value: number): number {
-  return Math.max(0, Number(value.toFixed(6)))
+  return Math.max(0, value)
 }
 
 function report(error: unknown, fallback: string): void {
@@ -679,11 +679,7 @@ restoreFlow()
               autocomplete="off"
             />
           </el-form-item>
-          <el-button
-            type="primary"
-            native-type="submit"
-            :loading="pending === 'recover-purchase'"
-          >
+          <el-button type="primary" native-type="submit" :loading="pending === 'recover-purchase'">
             关联并继续办理
           </el-button>
         </el-form>
@@ -720,7 +716,7 @@ restoreFlow()
               type="number"
               min="0"
               :max="line.limit"
-              step="0.000001"
+              step="any"
               aria-label="采购数量"
             />
           </div>
@@ -805,7 +801,7 @@ restoreFlow()
               type="number"
               min="0"
               :max="line.limit"
-              step="0.000001"
+              step="any"
               aria-label="到货数量"
             />
           </div>
@@ -846,21 +842,21 @@ restoreFlow()
                 type="number"
                 min="0"
                 :max="line.limit"
-                step="0.000001"
+                step="any"
             /></label>
             <label
               >合格数<el-input
                 v-model.number="line.passedQuantity"
                 type="number"
                 min="0"
-                step="0.000001"
+                step="any"
             /></label>
             <label
               >不合格数<el-input
                 v-model.number="line.rejectedQuantity"
                 type="number"
                 min="0"
-                step="0.000001"
+                step="any"
             /></label>
             <label class="inspection-note"
               >不合格说明<el-input v-model="line.defectNote" maxlength="240"
@@ -928,7 +924,7 @@ restoreFlow()
               type="number"
               min="0"
               :max="line.limit"
-              step="0.000001"
+              step="any"
               aria-label="上架数量"
             />
           </div>

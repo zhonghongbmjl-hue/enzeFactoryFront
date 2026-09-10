@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { createIdempotencyAttempt } from '@/api/http'
 import { productionApi, productionEvidenceApi } from '@/api/production'
+import { isPositiveDecimal } from '@/utils/decimal'
 import type {
   ProcessInspectionView,
   ProductionCompletion,
@@ -27,7 +28,8 @@ const reasons = computed(() => {
   if (!inspection.value) result.push('尚无可选择的过程初检')
   if (inspection.value?.result !== 'PASSED') result.push('所选初检不是通过版本')
   if (inspection.value && !inspection.value.coverageVerified) result.push('检查覆盖事实未验证')
-  if (inspection.value?.failedQuantity !== '0.000000') result.push('检查仍含失败数量')
+  if (inspection.value && isPositiveDecimal(inspection.value.failedQuantity))
+    result.push('检查仍含失败数量')
   if (inspection.value && inspection.value.manifest.objects.length < 1)
     result.push('冻结证据至少需要一张图片')
   return result

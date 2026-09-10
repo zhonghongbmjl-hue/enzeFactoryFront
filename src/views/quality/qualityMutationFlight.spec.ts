@@ -27,7 +27,7 @@ function validStoredFlight(overrides: Record<string, unknown> = {}) {
     sourceWorkOrderId: WORK_ORDER_ID,
     generation: 1,
     name: 'trimming',
-    payload: { workOrderId: WORK_ORDER_ID, quantity: '2.000000' },
+    payload: { workOrderId: WORK_ORDER_ID, quantity: '2.0000001' },
     key: '64f39c04-cc56-43d0-889f-a00fbbe627aa',
     status: 'IN_FLIGHT',
     startedAt: '2026-08-25T00:00:00.000Z',
@@ -64,7 +64,7 @@ describe('quality mutation flight security boundary', () => {
       { payload: { workOrderId: WORK_ORDER_ID, quantity: '2.000000', disposition: 'secret' } },
     ],
     ['invalid source UUID', { sourceSalesOrderId: 'sales-1' }],
-    ['invalid decimal', { payload: { workOrderId: WORK_ORDER_ID, quantity: '2' } }],
+    ['invalid decimal', { payload: { workOrderId: WORK_ORDER_ID, quantity: '2..0' } }],
     ['invalid key', { key: 'bad key' }],
     ['oversized result id', { status: 'CONFIRMED_PENDING_REFRESH', resultId: 'x'.repeat(129) }],
     [

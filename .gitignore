@@ -36,6 +36,9 @@ Thumbs.db
 
 # test coverage
 coverage/
+artifacts/
+playwright-report/
+test-results/
 
 # cache
 .cache/

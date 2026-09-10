@@ -7,6 +7,12 @@ import { createIdempotencyAttempt } from '@/api/http'
 import { useAuthStore } from '@/stores/auth'
 import type { DecimalString, Shipment, ShipmentOrderWorkspace } from '@/types/shipment'
 import {
+  addDecimal,
+  compareDecimal,
+  isNonNegativeDecimal,
+  isPositiveDecimal,
+} from '@/utils/decimal'
+import {
   useShipmentMutationFlight,
   type ShipmentMutationFlight,
   type ShipmentMutationRequest,
@@ -18,6 +24,7 @@ const auth = useAuthStore()
 const workspace = ref<ShipmentOrderWorkspace | null>(null)
 const loading = ref(false)
 const error = ref('')
+const recoveryNotice = ref('')
 const boxNo = ref('')
 const qualityInspectionId = ref('')
 const packingQuantity = ref('')
@@ -28,6 +35,17 @@ const afterSalesSourceId = ref('')
 const afterSalesQuantity = ref('')
 const afterSalesReason = ref('')
 const customerFeedback = ref('')
+const afterSalesReasonOptions = [
+  { value: 'QUALITY_ISSUE', label: '质量问题' },
+  { value: 'SIZE_OR_SPECIFICATION', label: '尺码／规格问题' },
+  { value: 'COLOR_OR_STYLE', label: '颜色／款式问题' },
+  { value: 'QUANTITY_SHORTAGE', label: '数量短缺' },
+  { value: 'PACKAGE_DAMAGED', label: '包装破损' },
+  { value: 'WRONG_ITEM', label: '发错货' },
+  { value: 'LOGISTICS_ISSUE', label: '物流问题' },
+  { value: 'CUSTOMER_REASON', label: '客户取消／主观原因' },
+  { value: 'OTHER', label: '其他' },
+]
 const attempt = createIdempotencyAttempt()
 const flightStore = useShipmentMutationFlight()
 const owner = Symbol('shipment-workspace')
@@ -58,17 +76,75 @@ const eligibleAfterSalesLines = computed(() =>
     .filter((item) => item.status === 'SIGNED' && (item.source ?? 'NORMAL') === 'NORMAL')
     .flatMap((item) => item.lines.map((line) => ({ shipment: item, line }))),
 )
-const decimalPattern = /^(?:0|[1-9]\d{0,11})\.\d{6}$/
+const hasAfterSalesRepackingBoxes = computed(() =>
+  (workspace.value?.boxes ?? []).some((box) =>
+    (box.lines ?? []).some((line) => Boolean(line.afterSalesInspectionId)),
+  ),
+)
+const regularShipmentBoxes = computed(() => {
+  const plannedByPackingItem = new Map<string, string>()
+  for (const shipment of workspace.value?.shipments ?? []) {
+    for (const line of shipment.lines) {
+      plannedByPackingItem.set(
+        line.packingItemId,
+        addDecimal(plannedByPackingItem.get(line.packingItemId) ?? '0', line.plannedQuantity),
+      )
+    }
+  }
 
+  return (workspace.value?.boxes ?? []).flatMap((box) => {
+    const lines = (box.lines ?? []).flatMap((line) => {
+      // 售后复检产生的重新装箱只能由售后任务创建补发单，不能进入普通发运。
+      if (line.afterSalesInspectionId) return []
+      const planned = plannedByPackingItem.get(line.id) ?? '0'
+      const remainingQuantity = addDecimal(line.quantity, `-${planned}`)
+      return compareDecimal(remainingQuantity, '0') > 0 ? [{ ...line, remainingQuantity }] : []
+    })
+    return lines.length ? [{ ...box, lines }] : []
+  })
+})
+function reconcileMisroutedAfterSalesFlight(value: ShipmentOrderWorkspace): void {
+  const pending = flight.value as ShipmentMutationFlight | null
+  if (
+    !pending ||
+    !['IN_FLIGHT', 'OUTCOME_UNKNOWN'].includes(pending.status) ||
+    pending.sourceId !== orderId.value ||
+    pending.request.name !== 'createShipment'
+  )
+    return
+
+  const afterSalesPackingItemIds = new Set(
+    value.boxes.flatMap((box) =>
+      (box.lines ?? [])
+        .filter((line) => Boolean(line.afterSalesInspectionId))
+        .map((line) => line.id),
+    ),
+  )
+  const misroutedItemIds = pending.request.payload.lines
+    .map((line) => line.packingItemId)
+    .filter((id) => afterSalesPackingItemIds.has(id))
+  if (!misroutedItemIds.length) return
+
+  const generatedAsNormalShipment = value.shipments.some((shipment) =>
+    shipment.lines.some((line) => misroutedItemIds.includes(line.packingItemId)),
+  )
+  pending.attempt.succeeded()
+  flightStore.clear(pending)
+  recoveryNotice.value = generatedAsNormalShipment
+    ? '检测到售后重新装箱已生成普通发运单，请勿继续补发并联系管理员处理。'
+    : '已根据权威发运事实清除旧的错误请求；请从下方对应售后任务创建补发发运单。'
+}
 async function load(expectedFlight: ShipmentMutationFlight | null = null): Promise<boolean> {
   const requested = orderId.value
   const token = ++sequence
   loading.value = true
   error.value = ''
+  recoveryNotice.value = ''
   try {
     const value = await shipmentApi.orderWorkspace(requested)
     if (!active || token !== sequence || requested !== orderId.value) return false
     workspace.value = value
+    reconcileMisroutedAfterSalesFlight(value)
     if (expectedFlight && flightStore.claimRefresh(owner, expectedFlight)) {
       expectedFlight.attempt.succeeded()
       flightStore.clear(expectedFlight)
@@ -154,13 +230,12 @@ async function retryOutcomeUnknown(): Promise<void> {
 function pack(): void {
   if (
     !canManage.value ||
-    !decimalPattern.test(packingQuantity.value) ||
-    packingQuantity.value === '0.000000' ||
+    !isPositiveDecimal(packingQuantity.value) ||
     !boxNo.value.trim() ||
     boxNo.value.length > 80 ||
     !qualityInspectionId.value.trim()
   ) {
-    error.value = '箱号、质检批次和数量格式无效（数量须为 6 位小数）'
+    error.value = '箱号、质检批次和数量格式无效（数量须大于零）'
     return
   }
   void mutate({
@@ -178,28 +253,37 @@ function pack(): void {
   })
 }
 function createShipment(): void {
-  const lines = (workspace.value?.boxes ?? []).flatMap((box) =>
-    (box.lines ?? [])
+  const lines = regularShipmentBoxes.value.flatMap((box) =>
+    box.lines
       .filter((line) => selectedPackingItems.value[line.id])
       .map((line) => ({
         packingOrderId: box.id,
         packingItemId: line.id,
         quantity: shipmentQuantity.value[line.id] ?? '',
+        remainingQuantity: line.remainingQuantity,
       })),
   )
   if (
     !canManage.value ||
     lines.length === 0 ||
-    lines.some((line) => !decimalPattern.test(line.quantity) || line.quantity === '0.000000')
+    lines.some(
+      (line) =>
+        !isPositiveDecimal(line.quantity) ||
+        compareDecimal(line.quantity, line.remainingQuantity) > 0,
+    )
   ) {
-    error.value = '请逐行选择包装明细并输入大于零的 6 位小数'
+    error.value = '请选择普通装箱明细，并输入不超过可发余额的大于零数量'
     return
   }
   void mutate({
     name: 'createShipment',
     payload: {
       salesOrderId: orderId.value,
-      lines: lines.map((line) => ({ ...line, quantity: line.quantity as DecimalString })),
+      lines: lines.map((line) => ({
+        packingOrderId: line.packingOrderId,
+        packingItemId: line.packingItemId,
+        quantity: line.quantity as DecimalString,
+      })),
     },
   })
 }
@@ -211,8 +295,8 @@ function progress(item: Shipment, name: 'dispatch' | 'sign'): void {
     shipmentLineId: line.id,
     quantity: progressQuantity.value[line.id] ?? '',
   }))
-  if (lines.length === 0 || lines.some((line) => !decimalPattern.test(line.quantity))) {
-    error.value = '请为每条发运明细输入 6 位小数（未处理行填 0.000000）'
+  if (lines.length === 0 || lines.some((line) => !isNonNegativeDecimal(line.quantity))) {
+    error.value = '请为每条发运明细输入非负数量（未处理行填 0）'
     return
   }
   void mutate({
@@ -234,8 +318,7 @@ function createAfterSales(): void {
   if (
     !canAfterSales.value ||
     !source ||
-    !decimalPattern.test(afterSalesQuantity.value) ||
-    afterSalesQuantity.value === '0.000000' ||
+    !isPositiveDecimal(afterSalesQuantity.value) ||
     !/^[A-Z0-9][A-Z0-9._:-]{0,119}$/.test(reason) ||
     feedback.length < 1 ||
     feedback.length > 500
@@ -296,6 +379,14 @@ onUnmounted(() => {
       <span class="order-chip">订单 {{ orderId }}</span>
     </header>
     <el-alert v-if="error" :title="error" type="error" :closable="false" show-icon role="alert" />
+    <el-alert
+      v-if="recoveryNotice"
+      :title="recoveryNotice"
+      type="warning"
+      :closable="false"
+      show-icon
+      role="status"
+    />
     <el-alert v-if="flight" type="warning" :closable="false" show-icon role="status">
       <span>{{
         flight.status === 'OUTCOME_UNKNOWN'
@@ -332,16 +423,22 @@ onUnmounted(() => {
       </el-form>
       <el-form data-testid="create-shipment-form" @submit.prevent="createShipment">
         <h2>创建发运单</h2>
-        <fieldset v-for="box in workspace.boxes" :key="box.id">
+        <p v-if="hasAfterSalesRepackingBoxes" class="shipment-form-note" role="status">
+          售后重新装箱不参与普通发运，请从下方对应售后任务创建补发发运单。
+        </p>
+        <p v-if="!regularShipmentBoxes.length" class="shipment-form-note" role="status">
+          暂无可用于普通发运的装箱明细。
+        </p>
+        <fieldset v-for="box in regularShipmentBoxes" :key="box.id">
           <legend>{{ box.boxNo }}</legend>
-          <label v-for="line in box.lines ?? []" :key="line.id" class="line-input">
+          <label v-for="line in box.lines" :key="line.id" class="line-input">
             <el-checkbox
               :model-value="selectedPackingItems[line.id] ?? false"
               :data-testid="`shipment-select-${line.id}`"
               :aria-label="`选择 SKU ${line.skuId}`"
               @update:model-value="selectedPackingItems[line.id] = Boolean($event)"
             />
-            <span>SKU {{ line.skuId }} / 可选 {{ line.quantity }}</span>
+            <span>SKU {{ line.skuId }} / 可发余额 {{ line.remainingQuantity }}</span>
             <el-input
               v-model="shipmentQuantity[line.id]"
               :disabled="!selectedPackingItems[line.id]"
@@ -355,7 +452,7 @@ onUnmounted(() => {
           data-testid="create-shipment"
           type="primary"
           native-type="submit"
-          :disabled="!!flight"
+          :disabled="!!flight || !regularShipmentBoxes.length"
         >
           创建发运单
         </el-button>
@@ -386,8 +483,12 @@ onUnmounted(() => {
           />
         </label>
         <label
-          >原因代码
-          <el-input v-model="afterSalesReason" data-testid="after-sales-reason" maxlength="120" />
+          >原因代码<SelectField
+            v-model="afterSalesReason"
+            data-testid="after-sales-reason"
+            placeholder="请选择原因"
+            :options="afterSalesReasonOptions"
+          />
         </label>
         <label
           >客户反馈
@@ -592,6 +693,10 @@ form label,
   display: grid;
   gap: 4px;
   margin: 8px 0;
+}
+.shipment-form-note {
+  line-height: 1.6;
+  color: #6d5d45;
 }
 .shipments article {
   display: grid;

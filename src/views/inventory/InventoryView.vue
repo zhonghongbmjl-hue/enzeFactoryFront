@@ -23,15 +23,6 @@ const loading = ref(false)
 const pending = ref(false)
 const failure = ref('')
 const traceId = ref('')
-const issue = ref({
-  issueNo: '',
-  orderItemId: '',
-  warehouseId: '',
-  materialId: '',
-  materialType: 'FABRIC' as MaterialType,
-  batchNo: '',
-  quantity: '0',
-})
 const fabricOptions = computed(() =>
   fabrics.value.map((item) => ({
     label: item.name,
@@ -52,6 +43,15 @@ const orderItemOptions = computed(() =>
     })),
   ),
 )
+const issue = ref({
+  issueNo: '',
+  orderItemId: '',
+  warehouseId: '',
+  materialId: '',
+  materialType: 'FABRIC' as MaterialType,
+  batchNo: '',
+  quantity: '0',
+})
 const returned = ref({ returnNo: '', materialIssueId: '', quantity: '0' })
 const issueAttempt = createIdempotencyAttempt()
 const returnAttempt = createIdempotencyAttempt()
@@ -100,12 +100,6 @@ async function load(): Promise<void> {
       inventoryApi.ledgers(materialQuery.value.trim()),
     ])
     applyMaterialSelection(materialQuery.value.trim())
-    const warehouseIds = [...new Set(balances.value.map((balance) => balance.warehouseId))]
-    if (warehouseIds.length === 1) issue.value.warehouseId = warehouseIds[0]
-    if (balances.value.length === 1) {
-      issue.value.warehouseId = balances.value[0].warehouseId
-      issue.value.batchNo = balances.value[0].batchNo
-    }
   } catch (error) {
     report(error, '库存数据加载失败')
   } finally {
@@ -154,7 +148,6 @@ async function submitReturn(): Promise<void> {
 
 watch(materialQuery, (materialId) => {
   applyMaterialSelection(materialId.trim())
-  issue.value.batchNo = ''
 })
 
 onMounted(loadIssueOptions)
@@ -287,24 +280,10 @@ onMounted(loadIssueOptions)
               ]"
             />
           </label>
-          <label>
-            <span>来源批次</span>
-            <el-input
-              v-model="issue.batchNo"
-              data-testid="issue-batch"
-              aria-label="来源批次"
-              placeholder="输入批次号"
-            />
-          </label>
+          <label><span>来源批次</span><el-input v-model="issue.batchNo" /></label>
           <label
             ><span>数量</span>
-            <el-input
-              v-model="issue.quantity"
-              inputmode="decimal"
-              min="0.000001"
-              step="0.000001"
-              required
-            />
+            <el-input v-model="issue.quantity" inputmode="decimal" min="0" step="any" required />
           </label>
         </div>
         <el-button type="primary" native-type="submit" :disabled="pending">确认领料</el-button>
@@ -325,13 +304,7 @@ onMounted(loadIssueOptions)
           /></label>
           <label
             ><span>数量</span>
-            <el-input
-              v-model="returned.quantity"
-              inputmode="decimal"
-              min="0.000001"
-              step="0.000001"
-              required
-            />
+            <el-input v-model="returned.quantity" inputmode="decimal" min="0" step="any" required />
           </label>
         </div>
         <el-button native-type="submit" :disabled="pending">确认退料</el-button>

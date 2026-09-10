@@ -173,7 +173,7 @@ describe('发运全局 mutation flight', () => {
               {
                 packingOrderId: SHIPMENT,
                 packingItemId: '33333333-3333-4333-8333-333333333333',
-                quantity: '1.000000',
+                quantity: '1.0000001',
               },
             ],
           },
@@ -219,7 +219,7 @@ describe('发运全局 mutation flight', () => {
           category: 'CUSTOMER_CLAIM',
           referenceNo: 'CLAIM-101',
           description: '索赔待结算',
-          affectedQuantity: '1.000000',
+          affectedQuantity: '1.0000001',
         },
       },
       key: 'shipment-exception-0002',

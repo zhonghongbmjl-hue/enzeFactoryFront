@@ -226,8 +226,8 @@ onMounted(load)
               v-model.number="row.usage"
               aria-label="单件用量"
               type="number"
-              min="0.000001"
-              step="0.000001"
+              min="0"
+              step="any"
             />
           </template>
         </el-table-column>
@@ -239,7 +239,7 @@ onMounted(load)
               type="number"
               min="0"
               max="1"
-              step="0.000001"
+              step="any"
             />
           </template>
         </el-table-column>

@@ -1,9 +1,14 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { planningApi } from '@/api/planning'
 import { productionApi, productionEvidenceApi } from '@/api/production'
 import WorkOrderListView from './WorkOrderListView.vue'
 import WorkOrderDetailView from './WorkOrderDetailView.vue'
 import ProcessInspectionPanel from './ProcessInspectionPanel.vue'
+
+const routeState = vi.hoisted(() => ({
+  query: { productionPlanId: 'plan-1' } as Record<string, string>,
+}))
 
 vi.mock('@/api/production', () => ({
   productionApi: {
@@ -19,15 +24,40 @@ vi.mock('@/api/production', () => ({
   },
   productionEvidenceApi: { latest: vi.fn().mockResolvedValue(null) },
 }))
-
+vi.mock('@/api/planning', () => ({
+  planningApi: { get: vi.fn() },
+}))
 vi.mock('vue-router', async () => {
   const actual = await vi.importActual<typeof import('vue-router')>('vue-router')
   return {
     ...actual,
-    useRoute: () => ({ params: { id: 'wo-1' } }),
-    useRouter: () => ({ push: vi.fn() }),
+    useRoute: () => ({
+      params: { id: 'wo-1' },
+      query: routeState.query,
+    }),
+    useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
   }
 })
+
+const SelectFieldStub = {
+  name: 'SelectField',
+  props: ['modelValue', 'options', 'id', 'name', 'dataTestid', 'disabled'],
+  emits: ['update:modelValue', 'change'],
+  template: `<select
+    :id="id"
+    :name="name"
+    :data-testid="dataTestid"
+    :value="modelValue"
+    :disabled="disabled"
+    @change="$emit('update:modelValue', $event.target.value); $emit('change', $event.target.value)"
+  ><option value=""></option><option v-for="item in options" :key="String(item.value)" :value="item.value">{{ item.label }}</option></select>`,
+}
+
+function mountList() {
+  return mount(WorkOrderListView, {
+    global: { stubs: { SelectField: SelectFieldStub } },
+  })
+}
 
 const workOrder = {
   id: 'wo-1',
@@ -70,9 +100,39 @@ const workOrder = {
   updatedAt: '2026-08-24T01:00:00Z',
 }
 
+const approvedPlan = {
+  id: 'plan-1',
+  planNo: 'PLAN-PB-001',
+  status: 'APPROVED' as const,
+  version: 1,
+  items: ['schedule-1', 'schedule-new'].map((scheduleId, index) => ({
+    id: `plan-item-${index + 1}`,
+    productionPlanId: 'plan-1',
+    salesOrderId: 'order-1',
+    orderItemId: 'order-item-1',
+    skuId: 'sku-1',
+    quantity: '10.000000',
+    schedule: {
+      id: scheduleId,
+      productionPlanItemId: `plan-item-${index + 1}`,
+      kittingReleaseId: `release-${index + 1}`,
+      factoryId: 'factory-1',
+      workshopId: 'workshop-1',
+      productionLineId: 'line-1',
+      startDate: '2026-08-25',
+      endDate: '2026-08-30',
+      plannedBatchCode: `PB-00${index + 1}`,
+      quantity: '10.000000',
+      approvalStatus: 'APPROVED' as const,
+      version: 1,
+    },
+  })),
+}
+
 describe('工单列表与详情', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    routeState.query.productionPlanId = 'plan-1'
     vi.mocked(productionApi.list).mockResolvedValue({
       content: [workOrder],
       totalElements: 1,
@@ -89,6 +149,7 @@ describe('工单列表与详情', () => {
       size: 20,
     })
     vi.mocked(productionApi.convert).mockResolvedValue(workOrder)
+    vi.mocked(planningApi.get).mockResolvedValue(approvedPlan)
     vi.mocked(productionApi.report).mockResolvedValue({
       ...workOrder,
       status: 'IN_PRODUCTION',
@@ -96,18 +157,34 @@ describe('工单列表与详情', () => {
   })
 
   it('lists status, batch, line and planned quantity and converts an approved schedule', async () => {
-    const wrapper = mount(WorkOrderListView)
+    const wrapper = mountList()
     await flushPromises()
 
     expect(wrapper.text()).toContain('WO-PB-001')
     expect(wrapper.text()).toContain('PB-001')
     expect(wrapper.text()).toContain('line-1')
     expect(wrapper.text()).toContain('10.000000')
+    expect(planningApi.get).toHaveBeenCalledWith('plan-1')
+    expect(wrapper.get('[data-testid="convert-schedule"]').text()).toContain(
+      'PB-001 · 数量 10.000000',
+    )
 
     await wrapper.get('[name="productionScheduleId"]').setValue('schedule-1')
     await wrapper.get('[data-testid="convert-form"]').trigger('submit')
     await flushPromises()
     expect(productionApi.convert).toHaveBeenCalledWith('schedule-1', expect.any(String))
+  })
+
+  it('does not expose UUID input when opened without a selected production plan', async () => {
+    delete routeState.query.productionPlanId
+
+    const wrapper = mountList()
+    await flushPromises()
+
+    expect(planningApi.get).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('请先选择已审批排产')
+    expect(wrapper.find('[name="productionPlanId"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('前往生产排产')
   })
 
   it('reloads the current full non-first page after conversion and keeps server paging order', async () => {
@@ -133,7 +210,7 @@ describe('工单列表与详情', () => {
       id: 'converted-on-server-first-page',
       workOrderNo: 'WO-CONVERTED',
     })
-    const wrapper = mount(WorkOrderListView)
+    const wrapper = mountList()
     await flushPromises()
     const view = wrapper.vm as unknown as { load: (page: number) => Promise<void> }
     await view.load(1)
@@ -155,7 +232,8 @@ describe('工单列表与详情', () => {
     vi.mocked(productionApi.list)
       .mockReturnValueOnce(stale.promise)
       .mockReturnValueOnce(refreshed.promise)
-    const wrapper = mount(WorkOrderListView)
+    const wrapper = mountList()
+    await flushPromises()
 
     await wrapper.get('[name="productionScheduleId"]').setValue('schedule-new')
     await wrapper.get('[data-testid="convert-form"]').trigger('submit')
@@ -200,6 +278,32 @@ describe('工单列表与详情', () => {
       expect.objectContaining({ inputQuantity: '4.000000', goodQuantity: '5.000000', version: 3 }),
       expect.any(String),
     )
+  })
+
+  it('待完工后提供带工单上下文的品质闭环入口', async () => {
+    vi.mocked(productionApi.get).mockResolvedValue({
+      ...workOrder,
+      status: 'READY_TO_COMPLETE',
+    })
+    const wrapper = mount(WorkOrderDetailView, {
+      global: {
+        stubs: {
+          RouterLink: {
+            name: 'RouterLink',
+            props: ['to'],
+            template: '<a data-testid="quality-link"><slot /></a>',
+          },
+        },
+      },
+    })
+    await flushPromises()
+
+    const link = wrapper.getComponent({ name: 'RouterLink' })
+    expect(link.text()).toContain('前往品质闭环')
+    expect(link.props('to')).toEqual({
+      name: 'quality',
+      query: { workOrderId: 'wo-1' },
+    })
   })
 
   it('refreshes the completion gate when the process inspection changes', async () => {

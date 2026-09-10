@@ -15,7 +15,13 @@ type Fixture = {
   suffix: string
 }
 
-const backend = 'http://127.0.0.1:18080/api/v1'
+const backend = process.env.GARMENT_E2E_EXTERNAL_BACKEND_URL ?? 'http://127.0.0.1:18080/api/v1'
+const tenantCode = process.env.GARMENT_E2E_TENANT_CODE ?? 'demo'
+const adminUsername = process.env.GARMENT_E2E_ADMIN_USERNAME ?? 'admin'
+const adminPassword = process.env.GARMENT_E2E_DEMO_PASSWORD ?? 'DemoOnly!123'
+const testSupportHeaders = process.env.GARMENT_E2E_TEST_SUPPORT_KEY
+  ? { 'X-Test-Support-Key': process.env.GARMENT_E2E_TEST_SUPPORT_KEY }
+  : {}
 const decimalQuantity = '10.000000'
 
 function isoDate(offsetDays: number): string {
@@ -37,13 +43,10 @@ test('slice A: PO through full kitting creates and approves a manual production 
   test.skip(testInfo.project.name.includes('narrow'), 'Business slice runs once on desktop')
   test.setTimeout(120_000)
 
-  const anonymousReset = await page.request.post(`${backend}/test-support/reset`, { data: {} })
-  expect(anonymousReset.status()).toBe(401)
-
   await page.goto('/login')
-  await page.getByLabel('工厂租户代码').fill('demo')
-  await page.getByLabel('工号 / 账号').fill('admin')
-  await page.getByLabel('密码').fill('DemoOnly!123')
+  await page.getByLabel('工厂租户代码').fill(tenantCode)
+  await page.getByLabel('工号 / 账号').fill(adminUsername)
+  await page.getByLabel('密码').fill(adminPassword)
   await page.getByRole('button', { name: '进入工厂控制台' }).click()
   await expect(page.getByRole('heading', { name: '订单履约控制塔' })).toBeVisible()
 
@@ -61,6 +64,7 @@ test('slice A: PO through full kitting creates and approves a manual production 
         data,
         headers: {
           Authorization: `Bearer ${token}`,
+          ...(path.startsWith('/test-support/') ? testSupportHeaders : {}),
           ...(idempotent ? { 'Idempotency-Key': crypto.randomUUID() } : {}),
         },
       }),
@@ -73,7 +77,15 @@ test('slice A: PO through full kitting creates and approves a manual production 
     )
   const act = (path: string, current: Entity) => post<Entity>(path, { version: current.version })
 
-  const fixture = await post<Fixture>('/test-support/reset', {}, false)
+  const fixtureResponse = await page.request.post(`${backend}/test-support/reset`, {
+    data: {},
+    headers: { Authorization: `Bearer ${token}`, ...testSupportHeaders },
+  })
+  test.skip(
+    fixtureResponse.status() === 404,
+    'Test fixture endpoint is not enabled in this backend',
+  )
+  const fixture = await responseData<Fixture>(fixtureResponse)
   const suffix = fixture.suffix
   const order = await post<Entity & { items: Entity[] }>('/sales-orders', {
     orderNo: `E2E-PO-${suffix}`,

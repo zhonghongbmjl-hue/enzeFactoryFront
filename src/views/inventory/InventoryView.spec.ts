@@ -145,15 +145,6 @@ describe('库存与领退料工作台', () => {
     expect(wrapper.get('[data-testid="issue-order-item"]').text()).not.toContain('PO-DRAFT')
     expect(wrapper.get('[data-testid="issue-warehouse"]').text()).toContain('WH-01 · 主仓')
     expect(wrapper.get('[data-testid="issue-material"]').text()).toContain('精纺羊毛')
-
-    await wrapper.get('[data-testid="material-query"]').setValue('material-id')
-    await wrapper.get('[data-testid="load-inventory"]').trigger('click')
-    await flushPromises()
-
-    expect(wrapper.get('[data-testid="issue-warehouse"]').element).toHaveProperty(
-      'value',
-      'warehouse-id',
-    )
-    expect(wrapper.get('[data-testid="issue-batch"]').element).toHaveProperty('value', 'LOT-001')
+    expect(wrapper.get('[data-testid="issue-material"]').text()).not.toContain('拉链')
   })
 })

@@ -1,6 +1,7 @@
 import { readonly, shallowRef, type DeepReadonly, type Ref } from 'vue'
 import type { IdempotencyAttempt } from '@/api/http'
 import { registerTenantCache } from '@/stores/tenantCache'
+import { isNonNegativeDecimal, isPositiveDecimal } from '@/utils/decimal'
 import type {
   AfterSalesAction,
   AfterSalesTransitionInput,
@@ -124,6 +125,12 @@ function sameScope(a: ShipmentMutationScope | null, b: ShipmentMutationScope | n
 function validVersion(value: unknown): value is number {
   return Number.isSafeInteger(value) && Number(value) >= 0
 }
+function validDecimal(value: unknown): value is DecimalString {
+  return isNonNegativeDecimal(value)
+}
+function positiveDecimal(value: unknown): value is DecimalString {
+  return typeof value === 'string' && isPositiveDecimal(value)
+}
 function freezeRequest(request: ShipmentMutationRequest): ShipmentMutationRequest {
   if (request.name === 'pack') {
     const lines = Object.freeze(request.payload.lines.map((line) => Object.freeze({ ...line })))
@@ -204,15 +211,13 @@ function validRequest(value: unknown): value is ShipmentMutationRequest {
         return (
           exact(value, ['qualityInspectionId', 'quantity']) &&
           SAFE_ID.test(String(value.qualityInspectionId)) &&
-          /^(?:0|[1-9]\d{0,11})\.\d{6}$/.test(String(value.quantity)) &&
-          value.quantity !== '0.000000'
+          positiveDecimal(value.quantity)
         )
       return (
         exact(value, ['packingOrderId', 'packingItemId', 'quantity']) &&
         SAFE_ID.test(String(value.packingOrderId)) &&
         SAFE_ID.test(String(value.packingItemId)) &&
-        /^(?:0|[1-9]\d{0,11})\.\d{6}$/.test(String(value.quantity)) &&
-        value.quantity !== '0.000000'
+        positiveDecimal(value.quantity)
       )
     })
   }
@@ -232,8 +237,7 @@ function validRequest(value: unknown): value is ShipmentMutationRequest {
       SAFE_ID.test(String(payload.originalShipmentId)) &&
       SAFE_ID.test(String(payload.originalPackingOrderId)) &&
       SAFE_ID.test(String(payload.originalPackingItemId)) &&
-      /^(?:0|[1-9]\d{0,11})\.\d{6}$/.test(String(payload.quantity)) &&
-      payload.quantity !== '0.000000' &&
+      positiveDecimal(payload.quantity) &&
       typeof payload.reasonCode === 'string' &&
       /^[A-Z0-9][A-Z0-9._:-]{0,119}$/.test(payload.reasonCode) &&
       typeof payload.customerFeedback === 'string' &&
@@ -263,7 +267,7 @@ function validRequest(value: unknown): value is ShipmentMutationRequest {
         return (
           exact(value, ['shipmentLineId', 'quantity']) &&
           SAFE_ID.test(String(value.shipmentLineId)) &&
-          /^(?:0|[1-9]\d{0,11})\.\d{6}$/.test(String(value.quantity))
+          validDecimal(value.quantity)
         )
       })
     )
@@ -296,8 +300,7 @@ function validRequest(value: unknown): value is ShipmentMutationRequest {
       payload.description.trim().length > 0 &&
       payload.description.length <= 500 &&
       !containsControlCharacter(payload.description) &&
-      /^(?:0|[1-9]\d{0,11})\.\d{6}$/.test(String(payload.affectedQuantity)) &&
-      payload.affectedQuantity !== '0.000000'
+      positiveDecimal(payload.affectedQuantity)
     )
   }
   if (item.name === 'resolveExceptionCase') {
@@ -381,8 +384,7 @@ function validRequest(value: unknown): value is ShipmentMutationRequest {
   if (item.action === 'rework/start')
     return (
       exact(payload, ['expectedVersion', 'quantity', 'workNote']) &&
-      /^(?:0|[1-9]\d{0,11})\.\d{6}$/.test(String(payload.quantity)) &&
-      payload.quantity !== '0.000000' &&
+      positiveDecimal(payload.quantity) &&
       typeof payload.workNote === 'string' &&
       payload.workNote.trim().length > 0 &&
       payload.workNote.length <= 500
@@ -399,8 +401,8 @@ function validRequest(value: unknown): value is ShipmentMutationRequest {
         'disposition',
       ]) &&
       ['SAMPLING', 'FULL'].includes(String(payload.method)) &&
-      [payload.submittedQuantity, payload.passedQuantity, payload.failedQuantity].every((value) =>
-        /^(?:0|[1-9]\d{0,11})\.\d{6}$/.test(String(value)),
+      [payload.submittedQuantity, payload.passedQuantity, payload.failedQuantity].every(
+        validDecimal,
       ) &&
       typeof payload.defectCode === 'string' &&
       payload.defectCode.length <= 120 &&
@@ -434,7 +436,7 @@ function validRequest(value: unknown): value is ShipmentMutationRequest {
         String(payload.dispositionType),
       ) &&
       ['RELEASE', 'DISPOSE', 'REWORK'].includes(String(payload.dispositionOutcome)) &&
-      /^(?:0|[1-9]\d{0,11})\.\d{6}$/.test(String(payload.dispositionQuantity)) &&
+      validDecimal(payload.dispositionQuantity) &&
       Number.isInteger(payload.additionalAttempts) &&
       Number(payload.additionalAttempts) >= 0 &&
       Number(payload.additionalAttempts) <= 5 &&
