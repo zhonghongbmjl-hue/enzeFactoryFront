@@ -6,6 +6,7 @@ import { salesOrderApi } from '@/api/orders'
 import { ApiClientError, createIdempotencyAttempt } from '@/api/http'
 import OrderTimeline from '@/components/order/OrderTimeline.vue'
 import { useAuthStore } from '@/stores/auth'
+import { formatQuantity } from '@/utils/presentation'
 import {
   ORDER_STATUS_LABELS,
   type OrderAction,
@@ -30,6 +31,7 @@ const manualDeliveryFile = ref<File>()
 const frozenManualDeliveryEvidence = ref<ManualDeliveryEvidence>()
 const manualDeliveryReason = ref('')
 const confirmedDeliveredAt = ref('')
+const closeDialogOpen = ref(false)
 const evidenceAttempt = createIdempotencyAttempt()
 const confirmationAttempt = createIdempotencyAttempt()
 const flightStore = useShipmentMutationFlight()
@@ -56,6 +58,28 @@ const canCancel = computed(
     order.value !== undefined &&
     ['DRAFT', 'PENDING_APPROVAL', 'APPROVED', 'MATERIAL_PREPARING'].includes(order.value.status),
 )
+const requirementsAreHistorical = computed(
+  () =>
+    order.value !== undefined &&
+    !['DRAFT', 'PENDING_APPROVAL', 'APPROVED', 'MATERIAL_PREPARING'].includes(order.value.status),
+)
+const canCloseOrder = computed(
+  () => order.value?.status === 'AFTER_SALES_OBSERVATION' && order.value.closureReadiness?.canClose,
+)
+const closureChecks = computed(() => [
+  {
+    label: '全部发运已签收',
+    passed: Boolean(order.value?.closureReadiness?.allShipmentsSigned),
+  },
+  {
+    label: '售后观察期已结束',
+    passed: Boolean(order.value?.closureReadiness?.observationPeriodEnded),
+  },
+  {
+    label: '质量、生产、采购、库存及售后异常均已关闭',
+    passed: Boolean(order.value?.closureReadiness?.allExceptionsClosed),
+  },
+])
 
 function currentScope(): ShipmentMutationScope | null {
   return auth.profile
@@ -157,8 +181,8 @@ async function initialize(): Promise<void> {
   }
 }
 
-async function act(action: OrderAction): Promise<void> {
-  if (!order.value || pendingAction.value) return
+async function act(action: OrderAction): Promise<boolean> {
+  if (!order.value || pendingAction.value) return false
   pendingAction.value = action
   failure.value = ''
   traceId.value = ''
@@ -172,11 +196,18 @@ async function act(action: OrderAction): Promise<void> {
         close: '订单已完成',
       }[action],
     )
+    return true
   } catch (error) {
     report(error, '订单状态更新失败')
+    return false
   } finally {
     pendingAction.value = ''
   }
+}
+
+async function closeOrder(): Promise<void> {
+  if (!canCloseOrder.value) return
+  if (await act('close')) closeDialogOpen.value = false
 }
 
 function selectManualDeliveryFile(event: Event): void {
@@ -268,6 +299,19 @@ function statusLabel(status?: OrderStatus): string {
   return status ? ORDER_STATUS_LABELS[status] : '创建'
 }
 
+function actionLabel(action: string): string {
+  return (
+    {
+      CREATE: '创建订单',
+      SUBMIT: '提交审核',
+      APPROVE: '审核通过',
+      CANCEL: '取消订单',
+      CLOSE: '关闭订单',
+      CONFIRM_MANUAL_DELIVERY: '确认人工送达',
+    }[action] ?? action
+  )
+}
+
 watch(
   () => [auth.profile?.tenantId, auth.profile?.userId, auth.generation] as const,
   () => {
@@ -288,7 +332,7 @@ onUnmounted(() => {
   <section v-if="order" class="order-detail" :aria-busy="loading">
     <header class="detail-ticket order-ticket">
       <div>
-        <p class="eyebrow">PURCHASE ORDER / {{ order.orderNo }}</p>
+        <p class="eyebrow">SALES ORDER / ORDER FULFILLMENT / {{ order.orderNo }}</p>
         <h1>{{ order.customerName }}</h1>
         <p>{{ order.customerCode }} · 下单日 {{ order.orderDate }} · 版本 {{ order.version }}</p>
       </div>
@@ -302,7 +346,7 @@ onUnmounted(() => {
           class="outline-action procurement-entry"
           :to="`/procurement/${order.id}`"
         >
-          采购与来料
+          {{ requirementsAreHistorical ? '采购与来料记录' : '采购与来料' }}
         </RouterLink>
         <RouterLink
           v-if="canViewShipment"
@@ -340,9 +384,9 @@ onUnmounted(() => {
         <el-button
           v-if="canApprove && order.status === 'AFTER_SALES_OBSERVATION'"
           data-testid="close-order"
-          type="primary"
-          :disabled="!!pendingAction"
-          @click="act('close')"
+          type="danger"
+          :disabled="!!pendingAction || !canCloseOrder"
+          @click="closeDialogOpen = true"
         >
           关闭订单
         </el-button>
@@ -362,6 +406,46 @@ onUnmounted(() => {
     </el-alert>
 
     <OrderTimeline :status="order.status" :progress="order.progress" />
+
+    <article
+      v-if="order.status === 'AFTER_SALES_OBSERVATION'"
+      class="pattern-panel closure-gate-panel"
+      data-testid="closure-gate"
+    >
+      <header class="panel-title">
+        <div>
+          <p class="eyebrow">ORDER CLOSURE GATE</p>
+          <h2>订单关闭检查</h2>
+        </div>
+        <span :class="['closure-state', { ready: canCloseOrder }]">
+          {{ canCloseOrder ? '可以关闭' : '暂不可关闭' }}
+        </span>
+      </header>
+      <ul class="closure-checks">
+        <li v-for="check in closureChecks" :key="check.label" :class="{ passed: check.passed }">
+          <span aria-hidden="true">{{ check.passed ? '✓' : '—' }}</span>
+          {{ check.label }}
+        </li>
+      </ul>
+      <p v-if="!canCloseOrder" class="closure-help">
+        完成所有未通过项后刷新页面；服务端会在提交时再次核验，避免误关订单。
+      </p>
+    </article>
+
+    <el-dialog v-model="closeDialogOpen" title="确认关闭订单" width="min(32rem, 92vw)">
+      <p>关闭后订单将进入“订单完成”，该生命周期操作不可撤销。</p>
+      <template #footer>
+        <el-button @click="closeDialogOpen = false">返回检查</el-button>
+        <el-button
+          type="danger"
+          data-testid="confirm-close-order"
+          :loading="pendingAction === 'close'"
+          @click="closeOrder"
+        >
+          确认关闭订单
+        </el-button>
+      </template>
+    </el-dialog>
 
     <article
       v-if="canConfirmManualDelivery"
@@ -439,7 +523,7 @@ onUnmounted(() => {
             <el-table-column prop="quantity" label="数量" min-width="80" />
             <el-table-column label="生产完成" min-width="200">
               <template #default="{ row }">
-                {{ row.productionCompletedQuantity }} / {{ row.quantity }} ·
+                {{ formatQuantity(row.productionCompletedQuantity) }} / {{ row.quantity }} ·
                 {{
                   row.productionStatus === 'READY'
                     ? '已齐套完成'
@@ -501,27 +585,37 @@ onUnmounted(() => {
       <article class="pattern-panel">
         <header class="panel-title">
           <div>
-            <p class="eyebrow">MATERIAL GAP</p>
-            <h2>物料需求</h2>
+            <p class="eyebrow">MATERIAL REQUIREMENT SNAPSHOT</p>
+            <h2>审批时物料需求快照</h2>
           </div>
         </header>
         <div v-if="order.requirements.length === 0" class="panel-empty">
           审核后自动计算库存占用与采购缺口。
         </div>
-        <ul class="requirement-list">
-          <li v-for="item in order.requirements" :key="item.id">
-            <header>
-              <span
-                ><code>{{ item.materialCode }}</code> {{ item.materialName }}</span
-              ><b>净缺口 {{ item.netRequirementQuantity }} {{ item.uom }}</b>
-            </header>
-            <div>
-              <span>毛需求 {{ item.grossQuantity }}</span>
-              <span>可用 {{ item.availableQuantity }}</span>
-              <span>已占用 {{ item.reservedQuantity }}</span>
-            </div>
-          </li>
-        </ul>
+        <details v-else class="requirement-snapshot" :open="!requirementsAreHistorical">
+          <summary v-if="requirementsAreHistorical">
+            查看审批时快照（{{ order.requirements.length }} 项）
+          </summary>
+          <p class="snapshot-notice">
+            以下数值冻结于订单审批时，仅用于追溯，不代表当前库存或待采购缺口。
+          </p>
+          <ul class="requirement-list">
+            <li v-for="item in order.requirements" :key="item.id">
+              <header>
+                <span
+                  ><code>{{ item.materialCode }}</code> {{ item.materialName }}</span
+                ><b
+                  >审批时净缺口 {{ formatQuantity(item.netRequirementQuantity) }} {{ item.uom }}</b
+                >
+              </header>
+              <div>
+                <span>审批时毛需求 {{ formatQuantity(item.grossQuantity) }}</span>
+                <span>审批时可用 {{ formatQuantity(item.availableQuantity) }}</span>
+                <span>审批时已占用 {{ formatQuantity(item.reservedQuantity) }}</span>
+              </div>
+            </li>
+          </ul>
+        </details>
       </article>
 
       <article class="pattern-panel order-span-two">
@@ -536,7 +630,7 @@ onUnmounted(() => {
             <time :datetime="entry.occurredAt">{{ formatMoment(entry.occurredAt) }}</time>
             <span
               ><b>{{ entry.actorName }}</b
-              ><small>{{ entry.action }}</small></span
+              ><small>{{ actionLabel(entry.action) }}</small></span
             >
             <span
               >{{ statusLabel(entry.fromStatus) }} → <b>{{ statusLabel(entry.toStatus) }}</b></span
@@ -557,6 +651,53 @@ onUnmounted(() => {
 <style scoped>
 .manual-delivery-panel {
   margin-bottom: 1.25rem;
+}
+
+.closure-gate-panel {
+  margin-bottom: 1.25rem;
+}
+
+.closure-state {
+  color: var(--danger-color, #a23b24);
+  font-weight: 800;
+}
+
+.closure-state.ready,
+.closure-checks li.passed {
+  color: var(--success-color, #287a61);
+}
+
+.closure-checks {
+  display: grid;
+  gap: 0.65rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.closure-checks li {
+  display: flex;
+  gap: 0.65rem;
+  align-items: flex-start;
+  color: var(--muted-color, #6f6b63);
+}
+
+.closure-checks li span {
+  width: 1.25rem;
+  flex: 0 0 1.25rem;
+  font-weight: 900;
+}
+
+.closure-help,
+.snapshot-notice {
+  color: var(--muted-color, #6f6b63);
+  line-height: 1.6;
+}
+
+.requirement-snapshot summary {
+  min-height: 2.75rem;
+  cursor: pointer;
+  font-weight: 800;
 }
 
 .manual-delivery-fields {

@@ -3,6 +3,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { shipmentApi } from '@/api/shipment'
+import { salesOrderApi } from '@/api/orders'
 import { useAuthStore } from '@/stores/auth'
 import type { AfterSalesCase, ExceptionCase } from '@/types/shipment'
 import AfterSalesInboxView from './AfterSalesInboxView.vue'
@@ -15,6 +16,18 @@ vi.mock('@/api/shipment', () => ({
     resolveExceptionCase: vi.fn(),
   },
 }))
+
+vi.mock('@/api/orders', () => ({
+  salesOrderApi: { list: vi.fn() },
+}))
+
+function selectField(wrapper: ReturnType<typeof mount>, testId: string) {
+  const field = wrapper
+    .findAllComponents({ name: 'SelectField' })
+    .find((item) => item.props('dataTestid') === testId)
+  if (!field) throw new Error(`SelectField [data-testid="${testId}"] not found`)
+  return field
+}
 
 const TENANT = '55555555-5555-4555-8555-555555555555'
 const USER = '66666666-6666-4666-8666-666666666666'
@@ -113,6 +126,20 @@ describe('全租户售后待办工作台', () => {
       hasNext: false,
       hasPrevious: false,
     })
+    vi.mocked(salesOrderApi.list).mockResolvedValue({
+      content: [
+        {
+          id: ORDER,
+          orderNo: 'SO-101',
+          customerName: '测试客户',
+          status: 'AFTER_SALES_OBSERVATION',
+        },
+      ],
+      totalElements: 1,
+      totalPages: 1,
+      page: 0,
+      size: 100,
+    } as never)
   })
 
   async function render() {
@@ -149,7 +176,7 @@ describe('全租户售后待办工作台', () => {
     })
     const wrapper = await render()
     expect(wrapper.text()).toContain('CLAIM-101')
-    await wrapper.get('[data-testid="exception-order-id"]').setValue(ORDER)
+    selectField(wrapper, 'exception-order-id').vm.$emit('update:modelValue', ORDER)
     await wrapper.get('[data-testid="exception-reference"]').setValue('CLAIM-102')
     await wrapper.get('[data-testid="exception-description"]').setValue('索赔待结算')
     await wrapper.get('[data-testid="exception-quantity"]').setValue('1.000000')

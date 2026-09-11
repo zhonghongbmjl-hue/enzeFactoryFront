@@ -13,6 +13,7 @@ import type {
   AfterSalesTransitionInput,
 } from '@/types/shipment'
 import { isNonNegativeDecimal, isPositiveDecimal } from '@/utils/decimal'
+import { formatQuantity, formatStatus, shortReference } from '@/utils/presentation'
 import {
   useShipmentMutationFlight,
   type ShipmentMutationFlight,
@@ -325,35 +326,39 @@ onUnmounted(() => {
       <dl>
         <div>
           <dt>原订单</dt>
-          <dd>{{ record.salesOrderId }}</dd>
+          <dd :title="record.salesOrderId">{{ shortReference(record.salesOrderId) }}</dd>
         </div>
         <div>
           <dt>订单明细</dt>
-          <dd>{{ record.orderItemId }}</dd>
+          <dd :title="record.orderItemId">{{ shortReference(record.orderItemId) }}</dd>
         </div>
         <div>
           <dt>SKU</dt>
-          <dd>{{ record.skuId }}</dd>
+          <dd :title="record.skuId">{{ shortReference(record.skuId) }}</dd>
         </div>
         <div>
           <dt>生产批次</dt>
-          <dd>{{ record.productionBatchId }}</dd>
+          <dd :title="record.productionBatchId">{{ shortReference(record.productionBatchId) }}</dd>
         </div>
         <div>
           <dt>生产工单</dt>
-          <dd>{{ record.workOrderId }}</dd>
+          <dd :title="record.workOrderId">{{ shortReference(record.workOrderId) }}</dd>
         </div>
         <div>
           <dt>原箱</dt>
-          <dd>{{ record.originalPackingOrderId }}</dd>
+          <dd :title="record.originalPackingOrderId">
+            {{ shortReference(record.originalPackingOrderId) }}
+          </dd>
         </div>
         <div>
           <dt>原发运</dt>
-          <dd>{{ record.originalShipmentId }}</dd>
+          <dd :title="record.originalShipmentId">
+            {{ shortReference(record.originalShipmentId) }}
+          </dd>
         </div>
         <div>
           <dt>售后数量</dt>
-          <dd>{{ record.quantity }}</dd>
+          <dd>{{ formatQuantity(record.quantity) }}</dd>
         </div>
         <div>
           <dt>客户反馈</dt>
@@ -368,13 +373,18 @@ onUnmounted(() => {
     <section v-if="record" class="action-card" data-testid="authoritative-progress">
       <h2>权威数量进度</h2>
       <p>
-        当前返工 {{ record.currentReworkStatus || '尚未开始' }} / 已检 {{ record.attemptCount }} 轮
+        当前返工
+        {{ record.currentReworkStatus ? formatStatus(record.currentReworkStatus) : '尚未开始' }} /
+        已检 {{ record.attemptCount }} 轮
       </p>
-      <p>累计合格 {{ record.cumulativePassed }}</p>
-      <p>批准放行 {{ record.releasedQuantity }} / 授权处置 {{ record.disposedQuantity }}</p>
-      <p>剩余待处理 {{ record.remainingQuantity }}</p>
+      <p>累计合格 {{ formatQuantity(record.cumulativePassed) }}</p>
+      <p>
+        批准放行 {{ formatQuantity(record.releasedQuantity) }} / 授权处置
+        {{ formatQuantity(record.disposedQuantity) }}
+      </p>
+      <p>剩余待处理 {{ formatQuantity(record.remainingQuantity) }}</p>
       <p v-if="record.currentDisposition">
-        当前处置 {{ record.currentDisposition.status }} /
+        当前处置 {{ formatStatus(record.currentDisposition.status) }} /
         {{ record.currentDisposition.type || '待审批' }} / {{ record.currentDisposition.quantity }}
       </p>
     </section>
@@ -382,11 +392,13 @@ onUnmounted(() => {
       <li
         v-for="(item, index) in statuses"
         :key="item.status"
-        :class="{ done: index <= currentIndex }"
+        :class="{ done: index < currentIndex, current: index === currentIndex }"
       >
         <span>{{ index + 1 }}</span
         ><b>{{ item.label }}</b
-        ><small>{{ item.status }}</small>
+        ><small>{{
+          index < currentIndex ? '已完成' : index === currentIndex ? '当前阶段' : '未开始'
+        }}</small>
       </li>
     </ol>
     <section v-if="record && nextAction" class="action-card">
@@ -493,7 +505,7 @@ onUnmounted(() => {
     </section>
     <section v-if="record?.reshipmentId" class="action-card">
       <div>
-        <b>补发发运单 {{ record.reshipmentId }}</b>
+        <b :title="record.reshipmentId">补发发运单 {{ shortReference(record.reshipmentId) }}</b>
         <p>补发仍需申请、独立审批、逐行发运与签收。</p>
       </div>
       <RouterLink :to="`/shipments/${record.salesOrderId}`">进入发运审批工作台</RouterLink>
@@ -572,6 +584,12 @@ h1 {
 .track li.done {
   background: #173f32;
   color: #fff;
+}
+.track li.current {
+  border-color: #cf5118;
+  background: #fff2e8;
+  color: #7f2f0d;
+  box-shadow: inset 0 0 0 2px #cf5118;
 }
 .track span {
   font: 700 18px monospace;

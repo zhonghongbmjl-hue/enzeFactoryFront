@@ -1,5 +1,16 @@
 import { expect, test, type Page } from '@playwright/test'
 
+function apiOk<T>(data: T, traceId = 'trace-e2e') {
+  return {
+    success: true,
+    code: 'OK',
+    message: '成功',
+    data,
+    traceId,
+    timestamp: '2026-08-23T00:00:00Z',
+  }
+}
+
 test('anonymous operator sees the factory login surface', async ({ page }) => {
   await page.goto('/')
   await expect(page).toHaveURL(/\/login\?returnTo=(?:%2F|\/)$/)
@@ -109,7 +120,7 @@ async function installFullPermissionSession(page: Page, extraPermissions: string
     return route.fulfill({
       status: 200,
       contentType: 'application/json',
-      body: JSON.stringify({ success: true, data }),
+      body: JSON.stringify(apiOk(data, 'trace-full-permission')),
     })
   })
 }
@@ -270,8 +281,8 @@ test('narrow navigation keeps meaningful visible and accessible labels', async (
   const mobileNavigation = page.getByRole('navigation', { name: '移动主导航' })
   await expect(overview).toBeVisible()
   await expect(planning).toBeVisible()
-  await expect(mobileNavigation.getByText('总览', { exact: true })).toBeVisible()
-  await expect(mobileNavigation.getByText('生产', { exact: true })).toBeVisible()
+  await expect(mobileNavigation.getByText('履约总览', { exact: true })).toBeVisible()
+  await expect(mobileNavigation.getByText('生产排产', { exact: true })).toBeVisible()
   await page.keyboard.press('Escape')
   await expect(mobileNavigation).toBeHidden()
   await expect(navigationTrigger).toBeFocused()
@@ -402,23 +413,23 @@ test('product list and detail expose permission actions without viewport overflo
   await page.route('**/api/v1/products?*', (route) =>
     route.fulfill({
       contentType: 'application/json',
-      body: JSON.stringify({
-        data: { content: [product], totalElements: 1, totalPages: 1, number: 0, size: 20 },
-      }),
+      body: JSON.stringify(
+        apiOk({ content: [product], totalElements: 1, totalPages: 1, number: 0, size: 20 }),
+      ),
     }),
   )
   await page.route('**/api/v1/products/p1', (route) =>
-    route.fulfill({ contentType: 'application/json', body: JSON.stringify({ data: product }) }),
+    route.fulfill({ contentType: 'application/json', body: JSON.stringify(apiOk(product)) }),
   )
   await page.route('**/api/v1/products/p1/skus', (route) =>
-    route.fulfill({ contentType: 'application/json', body: JSON.stringify({ data: [] }) }),
+    route.fulfill({ contentType: 'application/json', body: JSON.stringify(apiOk([])) }),
   )
   await page.route('**/api/v1/bom-versions?*', (route) =>
     route.fulfill({
       contentType: 'application/json',
-      body: JSON.stringify({
-        data: { content: [], totalElements: 0, totalPages: 0, page: 0, size: 20 },
-      }),
+      body: JSON.stringify(
+        apiOk({ content: [], totalElements: 0, totalPages: 0, page: 0, size: 20 }),
+      ),
     }),
   )
   await page.goto('/products')
@@ -455,25 +466,31 @@ test('BOM material query can select a catalog item beyond the first fifty and sa
       const body = route.request().postDataJSON() as { items: Array<{ materialId: string }> }
       expect(body.items[0]?.materialId).toBe('m51')
     }
-    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ data: bom }) })
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify(apiOk(bom)) })
   })
   await page.route('**/api/v1/materials/select?*', async (route) => {
     const query = new URL(route.request().url()).searchParams.get('query')
     await route.fulfill({
       contentType: 'application/json',
-      body: JSON.stringify({
-        data:
+      body: JSON.stringify(
+        apiOk(
           query === 'MAT-051'
             ? [{ id: 'm51', code: 'MAT-051', name: '第51号面料', active: true }]
             : [],
-      }),
+          'trace-material-select',
+        ),
+      ),
     })
   })
   await page.goto('/bom-versions/b1')
   await page.getByLabel('检索物料').fill('MAT-051')
+  const materialLookup = page.waitForResponse((response) => {
+    const url = response.url()
+    return url.includes('/api/v1/materials/select') && url.includes('MAT-051')
+  })
   await page.getByRole('button', { name: '查询启用物料' }).click()
+  await materialLookup
   await page.getByRole('button', { name: '添加物料' }).click()
-  await expect(page.getByLabel('物料', { exact: true })).toHaveValue('m51')
   await page.getByRole('button', { name: '保存草稿' }).click()
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
     page.viewportSize()?.width ?? 0,

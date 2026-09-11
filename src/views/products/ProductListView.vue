@@ -10,6 +10,7 @@ import { useProductListStore } from '@/stores/products'
 import ResponsiveFilterBar from '@/components/layout/ResponsiveFilterBar.vue'
 import SelectField from '@/components/form/SelectField.vue'
 import type { ProductInput } from '@/types/product'
+import { formatStatus } from '@/utils/presentation'
 
 const auth = useAuthStore()
 const router = useRouter()
@@ -124,12 +125,14 @@ onMounted(load)
         </el-table-column>
         <el-table-column label="状态" width="110">
           <template #default="{ row }">
-            <el-tag size="small">{{ row.status }}</el-tag>
+            <el-tag size="small">{{ formatStatus(row.status) }}</el-tag>
           </template>
         </el-table-column>
         <el-table-column label="操作" width="120">
           <template #default="{ row }">
-            <RouterLink :to="{ name: 'product-detail', params: { id: row.id } }"
+            <RouterLink
+              class="record-primary-link"
+              :to="{ name: 'product-detail', params: { id: row.id } }"
               >查看纸样</RouterLink
             >
           </template>
@@ -144,7 +147,7 @@ onMounted(load)
             <code>{{ row.styleNo }}</code
             ><small>{{ row.brand || '未设置品牌' }}</small>
           </div>
-          <el-tag size="small">{{ row.status }}</el-tag>
+          <el-tag size="small">{{ formatStatus(row.status) }}</el-tag>
         </header>
         <h2>{{ row.name }}</h2>
         <dl>

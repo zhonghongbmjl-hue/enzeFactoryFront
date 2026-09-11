@@ -9,12 +9,13 @@ import { createIdempotencyAttempt } from '@/api/http'
 import type { InventoryBalance, InventoryLedger, MaterialType } from '@/types/inventory'
 import type { MasterDataOption, MasterDataRecord } from '@/types/masterdata'
 import type { SalesOrder } from '@/types/order'
-import { compareDecimal } from '@/utils/decimal'
+import { compareDecimal, isPositiveDecimal } from '@/utils/decimal'
+import { formatDateTime, formatQuantity } from '@/utils/presentation'
 
 const CLOSED_ORDER_STATUSES = new Set(['DRAFT', 'CANCELLED', 'COMPLETED'])
 
 const materialQuery = ref('')
-const fabrics = ref<MasterDataRecord[]>([])
+const inventoryMaterials = ref<MasterDataRecord[]>([])
 const warehouses = ref<MasterDataOption[]>([])
 const orders = ref<SalesOrder[]>([])
 const balances = ref<InventoryBalance[]>([])
@@ -23,9 +24,9 @@ const loading = ref(false)
 const pending = ref(false)
 const failure = ref('')
 const traceId = ref('')
-const fabricOptions = computed(() =>
-  fabrics.value.map((item) => ({
-    label: item.name,
+const materialOptions = computed(() =>
+  inventoryMaterials.value.map((item) => ({
+    label: `${item.code} · ${item.name}`,
     value: item.id,
   })),
 )
@@ -43,6 +44,25 @@ const orderItemOptions = computed(() =>
     })),
   ),
 )
+const returnIssueOptions = computed(() => {
+  const seen = new Set<string>()
+  return ledgers.value.flatMap((entry) => {
+    if (
+      entry.eventType !== 'MATERIAL_ISSUED' ||
+      !entry.materialIssueId ||
+      seen.has(entry.materialIssueId)
+    ) {
+      return []
+    }
+    seen.add(entry.materialIssueId)
+    return [
+      {
+        value: entry.materialIssueId,
+        label: `${entry.businessReference || '领料记录'} · 批次 ${entry.batchNo || '无批次'} · ${formatDateTime(entry.occurredAt)}`,
+      },
+    ]
+  })
+})
 const issue = ref({
   issueNo: '',
   orderItemId: '',
@@ -55,6 +75,20 @@ const issue = ref({
 const returned = ref({ returnNo: '', materialIssueId: '', quantity: '0' })
 const issueAttempt = createIdempotencyAttempt()
 const returnAttempt = createIdempotencyAttempt()
+const canSubmitIssue = computed(
+  () =>
+    Boolean(
+      issue.value.issueNo.trim() &&
+      issue.value.orderItemId &&
+      issue.value.warehouseId &&
+      issue.value.materialId,
+    ) && isPositiveDecimal(issue.value.quantity),
+)
+const canSubmitReturn = computed(
+  () =>
+    Boolean(returned.value.returnNo.trim() && returned.value.materialIssueId) &&
+    isPositiveDecimal(returned.value.quantity),
+)
 
 function report(error: unknown, fallback: string): void {
   const candidate = error as { message?: string; traceId?: string }
@@ -64,9 +98,9 @@ function report(error: unknown, fallback: string): void {
 
 function applyMaterialSelection(materialId: string): void {
   issue.value.materialId = materialId
-  const fabric = fabrics.value.find((item) => item.id === materialId)
-  if (fabric?.materialType === 'FABRIC' || fabric?.materialType === 'ACCESSORY') {
-    issue.value.materialType = fabric.materialType
+  const material = inventoryMaterials.value.find((item) => item.id === materialId)
+  if (material?.materialType === 'FABRIC' || material?.materialType === 'ACCESSORY') {
+    issue.value.materialType = material.materialType
   }
 }
 
@@ -82,7 +116,9 @@ async function loadIssueOptions(): Promise<void> {
       masterDataApi.select('warehouses', '', 50),
       salesOrderApi.list({ page: 0, size: 50 }),
     ])
-    fabrics.value = materialPage.content.filter((item) => item.materialType === 'FABRIC')
+    inventoryMaterials.value = materialPage.content.filter((item) =>
+      ['FABRIC', 'ACCESSORY'].includes(String(item.materialType)),
+    )
     warehouses.value = warehouseRows
     orders.value = orderPage.content.filter((order) => !CLOSED_ORDER_STATUSES.has(order.status))
   } catch (error) {
@@ -169,14 +205,14 @@ onMounted(loadIssueOptions)
 
     <el-form class="query-strip" @submit.prevent="load">
       <label>
-        <span>面料名称</span>
+        <span>物料名称</span>
         <SelectField
           v-model="materialQuery"
           data-testid="material-query"
-          aria-label="面料名称"
-          placeholder="选择面料"
+          aria-label="物料名称"
+          placeholder="选择面料或辅料"
           filterable
-          :options="fabricOptions"
+          :options="materialOptions"
         />
       </label>
       <el-button data-testid="load-inventory" type="primary" :disabled="loading" @click="load">
@@ -204,15 +240,15 @@ onMounted(loadIssueOptions)
         <dl>
           <div>
             <dt>现存</dt>
-            <dd>{{ balance.onHand }}</dd>
+            <dd>{{ formatQuantity(balance.onHand) }}</dd>
           </div>
           <div>
             <dt>预占</dt>
-            <dd>{{ balance.reserved }}</dd>
+            <dd>{{ formatQuantity(balance.reserved) }}</dd>
           </div>
           <div class="available">
             <dt>可用</dt>
-            <dd data-testid="available-quantity">{{ balance.available }}</dd>
+            <dd data-testid="available-quantity">{{ formatQuantity(balance.available) }}</dd>
           </div>
         </dl>
         <footer>
@@ -221,7 +257,7 @@ onMounted(loadIssueOptions)
         </footer>
       </article>
       <p v-if="!balances.length && !loading" class="empty-note">
-        选择面料名称，查看跨仓库、跨批次的实时可用量。
+        选择物料名称，查看跨仓库、跨批次的实时可用量。
       </p>
     </div>
 
@@ -259,14 +295,14 @@ onMounted(loadIssueOptions)
             />
           </label>
           <label>
-            <span>面料名称</span>
+            <span>物料名称</span>
             <SelectField
               v-model="materialQuery"
               data-testid="issue-material"
-              aria-label="领料面料"
-              placeholder="选择面料"
+              aria-label="领料物料"
+              placeholder="选择面料或辅料"
               filterable
-              :options="fabricOptions"
+              :options="materialOptions"
             />
           </label>
           <label
@@ -286,7 +322,12 @@ onMounted(loadIssueOptions)
             <el-input v-model="issue.quantity" inputmode="decimal" min="0" step="any" required />
           </label>
         </div>
-        <el-button type="primary" native-type="submit" :disabled="pending">确认领料</el-button>
+        <p v-if="!canSubmitIssue" class="form-hint">
+          请完整选择订单项、仓库和物料，并填写大于 0 的数量。
+        </p>
+        <el-button type="primary" native-type="submit" :disabled="pending || !canSubmitIssue"
+          >确认领料</el-button
+        >
       </el-form>
 
       <el-form class="movement-card return" @submit.prevent="submitReturn">
@@ -299,15 +340,26 @@ onMounted(loadIssueOptions)
         </header>
         <div class="field-grid single">
           <label><span>退料单号</span><el-input v-model="returned.returnNo" required /></label>
-          <label
-            ><span>原领料 ID</span><el-input v-model="returned.materialIssueId" required
-          /></label>
+          <label>
+            <span>原领料记录</span>
+            <SelectField
+              v-model="returned.materialIssueId"
+              data-testid="return-material-issue"
+              aria-label="原领料记录"
+              placeholder="先选择物料并读取库存流水"
+              filterable
+              :options="returnIssueOptions"
+            />
+          </label>
           <label
             ><span>数量</span>
             <el-input v-model="returned.quantity" inputmode="decimal" min="0" step="any" required />
           </label>
         </div>
-        <el-button native-type="submit" :disabled="pending">确认退料</el-button>
+        <p v-if="!returnIssueOptions.length" class="form-hint">
+          当前物料没有可选领料记录；请先在上方选择物料并读取库存。
+        </p>
+        <el-button native-type="submit" :disabled="pending || !canSubmitReturn">确认退料</el-button>
       </el-form>
     </div>
 
@@ -321,16 +373,16 @@ onMounted(loadIssueOptions)
       </header>
       <ol>
         <li v-for="entry in ledgers" :key="entry.id">
-          <time>{{ new Date(entry.occurredAt).toLocaleString('zh-CN') }}</time>
+          <time>{{ formatDateTime(entry.occurredAt) }}</time>
           <strong>{{ entry.eventType }}</strong
           ><code>{{ entry.batchNo || '无批次' }}</code>
           <span
             >现存 {{ compareDecimal(entry.deltaOnHand, '0') > 0 ? '+' : ''
-            }}{{ entry.deltaOnHand }}</span
+            }}{{ formatQuantity(entry.deltaOnHand) }}</span
           >
           <span
             >预占 {{ compareDecimal(entry.deltaReserved, '0') > 0 ? '+' : ''
-            }}{{ entry.deltaReserved }}</span
+            }}{{ formatQuantity(entry.deltaReserved) }}</span
           >
           <small>{{ entry.businessReference }}</small>
         </li>

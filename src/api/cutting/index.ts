@@ -17,6 +17,9 @@ export function createCuttingApi(client: AxiosInstance) {
       idempotent ? withIdempotency({ method: 'post' }, idempotencyKey) : undefined,
     )
   return {
+    async list(limit = 50): Promise<CuttingOrder[]> {
+      return request.get<CuttingOrder[]>('/cutting-orders', { params: { limit } })
+    },
     async create(
       input: {
         cuttingNo: string

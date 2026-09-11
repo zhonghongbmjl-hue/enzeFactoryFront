@@ -10,7 +10,8 @@
   --fabric-300: #cfc5af;
   --orange-500: #ed6c2c;
   --orange-600: #cf5118;
-  --green-400: #78b99a;
+  --green-400: #287a61;
+  --green-700: #1f654f;
   --text-note-on-fabric: #5d6d72;
   --text-secondary-on-fabric: #596a70;
   --text-muted-on-fabric: #55686e;
@@ -57,6 +58,16 @@ a:focus-visible,
 input:focus-visible {
   outline: 3px solid rgba(237, 108, 44, 0.48);
   outline-offset: 3px;
+}
+
+.desktop-record-table a,
+.record-primary-link,
+.plan-entry-link,
+.quality-link {
+  color: var(--text-accent-on-fabric);
+  font-weight: 750;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
 }
 
 .eyebrow {

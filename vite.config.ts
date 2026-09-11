@@ -7,7 +7,7 @@ export default defineConfig(({ mode }) => {
   // Keep the browser on a same-origin /api URL and switch only the dev proxy target.
   // Named Vite modes provide explicit local/original backend profiles; this fallback
   // makes an unprofiled Vite invocation use the backend checked out beside the frontend.
-  const apiTarget = env.VITE_DEV_API_TARGET || 'http://127.0.0.1:8080'
+  const apiTarget = env.VITE_DEV_API_TARGET || 'http://127.0.0.1:18080'
   const proxy = {
     '/api': {
       target: apiTarget,

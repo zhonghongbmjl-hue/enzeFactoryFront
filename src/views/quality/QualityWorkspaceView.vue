@@ -15,6 +15,7 @@ import {
   isPositiveDecimal,
   normalizeDecimalInput,
 } from '@/utils/decimal'
+import { formatQuantity, formatStatus, shortReference } from '@/utils/presentation'
 import type {
   InspectionMethod,
   OrderQualityFacts,
@@ -125,6 +126,20 @@ const workOrderOptions = computed(() =>
   (orderFacts.value?.items ?? []).flatMap((item) =>
     item.workOrders.map((workOrder) => ({ ...workOrder, skuId: item.skuId })),
   ),
+)
+const canTrim = computed(
+  () => Boolean(facts.value) && isPositiveDecimal(facts.value!.trimmingAvailableQuantity),
+)
+const canInspect = computed(
+  () => Boolean(facts.value) && isPositiveDecimal(facts.value!.inspectionAvailableQuantity),
+)
+const qualityWorkflowComplete = computed(
+  () =>
+    facts.value?.status === 'PASSED' &&
+    !canTrim.value &&
+    !canInspect.value &&
+    pendingReworks.value.length === 0 &&
+    !isPositiveDecimal(facts.value.pendingDispositionQuantity),
 )
 
 function methodLabel(method: InspectionMethod): string {
@@ -701,22 +716,30 @@ onMounted(initializePage)
     <template v-if="orderFacts">
       <div class="fact-strip">
         <article>
-          <span>订单需求</span><strong>{{ orderFacts.requiredQuantity }}</strong
-          ><small>{{ orderFacts.orderNo }} · 主状态 {{ orderFacts.mainStatus }}</small>
+          <span>订单需求</span><strong>{{ formatQuantity(orderFacts.requiredQuantity) }}</strong
+          ><small
+            >{{ orderFacts.orderNo }} · 主状态 {{ formatStatus(orderFacts.mainStatus) }}</small
+          >
         </article>
         <article>
-          <span>生产完成账本</span><strong>{{ orderFacts.completedQuantity }}</strong
-          ><small>Task 14 不可变完成事实</small>
+          <span>生产完成账本</span
+          ><strong>{{ formatQuantity(orderFacts.completedQuantity) }}</strong
+          ><small>不可变生产完成记录</small>
         </article>
         <article>
-          <span>已后整 / 已初检</span><strong>{{ orderFacts.trimmedQuantity }}</strong
-          ><small>{{ orderFacts.initialInspectedQuantity }} 已进入正式检验</small>
+          <span>已后整 / 已初检</span
+          ><strong>{{ formatQuantity(orderFacts.trimmedQuantity) }}</strong
+          ><small>{{ formatQuantity(orderFacts.initialInspectedQuantity) }} 已进入正式检验</small>
         </article>
         <article class="accent">
-          <span>正式通过 / 待返工</span><strong>{{ orderFacts.passedQuantity }}</strong
+          <span>正式通过 / 待返工</span
+          ><strong>{{ formatQuantity(orderFacts.passedQuantity) }}</strong
           ><small
-            >{{ orderFacts.pendingReworkQuantity }} 待返工 ·
-            {{ orderFacts.pendingDispositionQuantity }} 待处置审批；不推动订单主状态</small
+            >{{ formatQuantity(orderFacts.pendingReworkQuantity) }} 待返工 ·
+            {{
+              formatQuantity(orderFacts.pendingDispositionQuantity)
+            }}
+            待处置审批；不推动订单主状态</small
           >
         </article>
       </div>
@@ -724,27 +747,32 @@ onMounted(initializePage)
       <section class="order-tree" data-testid="order-quality-tree">
         <div class="ledger-title">
           <h2>SKU / 生产批次质量层级</h2>
-          <span>{{ orderFacts.status }}</span>
+          <span>{{ formatStatus(orderFacts.status) }}</span>
         </div>
         <article v-for="item in orderFacts.items" :key="item.orderItemId" class="item-facts">
           <header>
-            <code>SKU {{ item.skuId }}</code
-            ><b>{{ item.status }}</b
-            ><span>需求 {{ item.requiredQuantity }} · 通过 {{ item.passedQuantity }}</span>
+            <code :title="item.skuId">SKU {{ shortReference(item.skuId) }}</code
+            ><b>{{ formatStatus(item.status) }}</b
+            ><span
+              >需求 {{ formatQuantity(item.requiredQuantity) }} · 通过
+              {{ formatQuantity(item.passedQuantity) }}</span
+            >
           </header>
           <div
             v-for="workOrder in item.workOrders"
             :key="workOrder.workOrderId"
             class="batch-facts"
           >
-            <code>{{ workOrder.workOrderId }}</code
-            ><span>批次 {{ workOrder.productionBatchId }}</span
-            ><span>完成 {{ workOrder.completedQuantity }}</span
-            ><span>后整 {{ workOrder.trimmedQuantity }}</span
-            ><span>初检 {{ workOrder.initialInspectedQuantity }}</span
-            ><span>通过 {{ workOrder.passedQuantity }}</span
-            ><span>返工 {{ workOrder.pendingReworkQuantity }}</span
-            ><span>待处置 {{ workOrder.pendingDispositionQuantity }}</span
+            <code :title="workOrder.workOrderId"
+              >工单 {{ shortReference(workOrder.workOrderId) }}</code
+            ><span :title="workOrder.productionBatchId"
+              >批次 {{ shortReference(workOrder.productionBatchId) }}</span
+            ><span>完成 {{ formatQuantity(workOrder.completedQuantity) }}</span
+            ><span>后整 {{ formatQuantity(workOrder.trimmedQuantity) }}</span
+            ><span>初检 {{ formatQuantity(workOrder.initialInspectedQuantity) }}</span
+            ><span>通过 {{ formatQuantity(workOrder.passedQuantity) }}</span
+            ><span>返工 {{ formatQuantity(workOrder.pendingReworkQuantity) }}</span
+            ><span>待处置 {{ formatQuantity(workOrder.pendingDispositionQuantity) }}</span
             ><span
               >方式 {{ workOrder.inspectionMethods.map(methodLabel).join(' / ') || '待检' }}</span
             >
@@ -760,17 +788,26 @@ onMounted(initializePage)
           :options="
             workOrderOptions.map((item) => ({
               value: item.workOrderId,
-              label: `${item.workOrderId} · SKU ${item.skuId} · 批次 ${item.productionBatchId}`,
+              label: `工单 ${shortReference(item.workOrderId)} · SKU ${shortReference(item.skuId)} · 批次 ${shortReference(item.productionBatchId)}`,
             }))
           "
           @change="selectWorkOrder"
       /></label>
 
-      <div v-if="facts" class="work-grid">
+      <el-alert
+        v-if="qualityWorkflowComplete"
+        title="该工单的后整、正式质检与返工已全部完成"
+        description="当前为只读归档状态；如需追溯，请查看下方不可变批次账。"
+        type="success"
+        :closable="false"
+        show-icon
+      />
+      <div v-if="facts && !qualityWorkflowComplete" class="work-grid">
         <el-form data-testid="trim-form" class="action-card" @submit.prevent="submitTrimming">
           <div class="card-no">01</div>
           <h2>后整入账 · 待后整</h2>
-          <p>来源：生产完成账本；可用 {{ facts.trimmingAvailableQuantity }}</p>
+          <p>来源：生产完成账本；可用 {{ formatQuantity(facts.trimmingAvailableQuantity) }}</p>
+          <p v-if="!canTrim" class="action-hint">已无待后整数量，本步骤无需操作。</p>
           <label
             >后整数量
             <el-input
@@ -779,14 +816,14 @@ onMounted(initializePage)
               inputmode="decimal"
               placeholder="0.000000"
               required
-              :disabled="mutationBusy"
+              :disabled="mutationBusy || !canTrim"
             />
           </label>
           <el-button
             data-testid="trim-submit"
             type="primary"
             native-type="button"
-            :disabled="trimBusy || mutationBusy"
+            :disabled="trimBusy || mutationBusy || !canTrim"
             @click="submitTrimming"
           >
             {{ trimBusy ? '处理中…' : '确认后整' }}
@@ -800,13 +837,14 @@ onMounted(initializePage)
         >
           <div class="card-no">02</div>
           <h2>唯一正式成品质检</h2>
-          <p>类型固定 FINISHED_PRODUCT；方式选择抽检或全检；提交 = 通过 + 失败</p>
+          <p>检验方式可选抽检或全检；提交数量必须等于通过数量加失败数量。</p>
+          <p v-if="!canInspect" class="action-hint">已无待检数量，本步骤无需操作。</p>
           <label
             >检验方式<SelectField
               v-model="inspectionMethod"
               name="inspectionMethod"
               aria-required="true"
-              :disabled="mutationBusy"
+              :disabled="mutationBusy || !canInspect"
               :options="[
                 { label: '抽检', value: 'SAMPLING' },
                 { label: '全检', value: 'FULL' },
@@ -819,7 +857,7 @@ onMounted(initializePage)
                 v-model="submittedQuantity"
                 name="submittedQuantity"
                 required
-                :disabled="mutationBusy"
+                :disabled="mutationBusy || !canInspect"
               />
             </label>
             <label
@@ -828,7 +866,7 @@ onMounted(initializePage)
                 v-model="passedQuantity"
                 name="passedQuantity"
                 required
-                :disabled="mutationBusy"
+                :disabled="mutationBusy || !canInspect"
               />
             </label>
             <label
@@ -837,21 +875,27 @@ onMounted(initializePage)
                 v-model="failedQuantity"
                 name="failedQuantity"
                 required
-                :disabled="mutationBusy"
+                :disabled="mutationBusy || !canInspect"
               />
             </label>
           </div>
           <label
-            >缺陷代码<el-input v-model="defectCode" name="defectCode" :disabled="mutationBusy"
+            >缺陷代码<el-input
+              v-model="defectCode"
+              name="defectCode"
+              :disabled="mutationBusy || !canInspect"
           /></label>
           <label
-            >处置说明<el-input v-model="disposition" name="disposition" :disabled="mutationBusy"
+            >处置说明<el-input
+              v-model="disposition"
+              name="disposition"
+              :disabled="mutationBusy || !canInspect"
           /></label>
           <el-button
             data-testid="inspection-submit"
             type="primary"
             native-type="submit"
-            :disabled="inspectionBusy || mutationBusy"
+            :disabled="inspectionBusy || mutationBusy || !canInspect"
           >
             {{ inspectionBusy ? '处理中…' : '冻结检验批次' }}
           </el-button>
@@ -949,23 +993,27 @@ onMounted(initializePage)
       <section v-if="facts" class="ledger">
         <div class="ledger-title">
           <h2>不可变批次账</h2>
-          <span>{{ facts.status }}</span>
+          <span>{{ formatStatus(facts.status) }}</span>
         </div>
         <div v-for="inspection in facts.inspections" :key="inspection.id" class="ledger-row">
-          <code>{{ inspection.id }}</code
+          <code :title="inspection.id">检验 {{ shortReference(inspection.id) }}</code
           ><span>V{{ inspection.inspectionVersion }}</span
           ><span>{{ methodLabel(inspection.inspectionMethod) }}</span
-          ><span>{{ inspection.result }}</span
-          ><span>{{ inspection.passedQuantity }} / {{ inspection.failedQuantity }}</span
-          ><small v-if="inspection.sourceInspectionId"
-            >来源 {{ inspection.sourceInspectionId }}</small
+          ><span>{{ formatStatus(inspection.result) }}</span
+          ><span
+            >通过 {{ formatQuantity(inspection.passedQuantity) }} / 失败
+            {{ formatQuantity(inspection.failedQuantity) }}</span
+          ><small v-if="inspection.sourceInspectionId" :title="inspection.sourceInspectionId"
+            >来源 {{ shortReference(inspection.sourceInspectionId) }}</small
           >
         </div>
         <div v-for="rework in facts.reworkOrders" :key="rework.id" class="ledger-row rework">
-          <code>{{ rework.id }}</code
-          ><span>{{ rework.status }}</span
-          ><span>{{ rework.quantity }}</span
-          ><small>来源检验 {{ rework.sourceInspectionId }}</small>
+          <code :title="rework.id">返工 {{ shortReference(rework.id) }}</code
+          ><span>{{ formatStatus(rework.status) }}</span
+          ><span>{{ formatQuantity(rework.quantity) }}</span
+          ><small :title="rework.sourceInspectionId"
+            >来源检验 {{ shortReference(rework.sourceInspectionId) }}</small
+          >
         </div>
         <div
           v-for="pending in facts.nonconformingDispositions"
@@ -1159,6 +1207,13 @@ onMounted(initializePage)
   margin: 0;
   color: #626b66;
   font-size: 13px;
+}
+.action-card .action-hint {
+  padding: 9px 11px;
+  border-left: 3px solid var(--green-400);
+  background: #edf6f1;
+  color: var(--green-700);
+  font-weight: 700;
 }
 .card-no {
   position: absolute;

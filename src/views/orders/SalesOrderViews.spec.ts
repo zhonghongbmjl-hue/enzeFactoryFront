@@ -287,6 +287,8 @@ describe('订单页面', () => {
     expect(wrapper.text()).toContain('售后观察')
     expect(wrapper.text()).toContain('订单完成')
     expect(wrapper.get('[aria-label="订单执行进度"]').text()).toContain('30%')
+    expect(wrapper.get('[aria-label="当前订单阶段"]').text()).toContain('生产中')
+    expect(wrapper.get('[aria-label="当前订单阶段"]').text()).toContain('第 5 / 11 步')
   })
 
   it('详情展示冻结BOM、物料缺口与审计历史，并按状态权限暴露审核动作', async () => {
@@ -302,11 +304,78 @@ describe('订单页面', () => {
     expect(wrapper.text()).toContain('BOM-V3')
     expect(wrapper.text()).toContain('产品 v7 · SKU v11')
     expect(wrapper.text()).toContain('FAB-01')
-    expect(wrapper.text()).toContain('净缺口')
+    expect(wrapper.text()).toContain('审批时物料需求快照')
+    expect(wrapper.text()).toContain('审批时净缺口')
+    expect(wrapper.text()).toContain('SALES ORDER / ORDER FULFILLMENT')
+    expect(wrapper.text()).not.toContain('PURCHASE ORDER')
     expect(wrapper.text()).toContain('王跟单')
-    expect(wrapper.text()).toContain('30.000000 / 100 · 部分完成')
+    expect(wrapper.text()).toContain('30 / 100 · 部分完成')
     expect(wrapper.find('[data-testid="approve-order"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="cancel-order"]').exists()).toBe(false)
+  })
+
+  it('售后观察期展示关闭条件，条件未满足时禁用关闭操作并收起历史物料快照', async () => {
+    vi.mocked(salesOrderApi.get).mockResolvedValue({
+      ...order,
+      status: 'AFTER_SALES_OBSERVATION',
+      closureReadiness: {
+        allShipmentsSigned: true,
+        observationPeriodEnded: false,
+        allExceptionsClosed: true,
+        canClose: false,
+      },
+    })
+    permissions(['ORDER_VIEW', 'ORDER_APPROVE'])
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [{ path: '/orders/:id', component: SalesOrderDetailView }],
+    })
+    await router.push('/orders/order-id')
+    await router.isReady()
+    const wrapper = mount(SalesOrderDetailView, { global: { plugins: [router] } })
+    await flushPromises()
+
+    expect(wrapper.get('[data-testid="closure-gate"]').text()).toContain('暂不可关闭')
+    expect(wrapper.get('[data-testid="closure-gate"]').text()).toContain('售后观察期已结束')
+    expect(wrapper.get('[data-testid="close-order"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('.requirement-snapshot').attributes('open')).toBeUndefined()
+    expect(wrapper.text()).toContain('仅用于追溯，不代表当前库存或待采购缺口')
+  })
+
+  it('全部关闭条件满足后仍要求二次确认才提交关闭动作', async () => {
+    const observing: SalesOrder = {
+      ...order,
+      status: 'AFTER_SALES_OBSERVATION',
+      closureReadiness: {
+        allShipmentsSigned: true,
+        observationPeriodEnded: true,
+        allExceptionsClosed: true,
+        canClose: true,
+      },
+    }
+    vi.mocked(salesOrderApi.get).mockResolvedValue(observing)
+    vi.mocked(salesOrderApi.action).mockResolvedValue({ ...observing, status: 'COMPLETED' })
+    permissions(['ORDER_VIEW', 'ORDER_APPROVE'])
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [{ path: '/orders/:id', component: SalesOrderDetailView }],
+    })
+    await router.push('/orders/order-id')
+    await router.isReady()
+    const wrapper = mount(SalesOrderDetailView, {
+      attachTo: document.body,
+      global: { plugins: [router], stubs: { teleport: true } },
+    })
+    await flushPromises()
+
+    await wrapper.get('[data-testid="close-order"]').trigger('click')
+    await flushPromises()
+    expect(salesOrderApi.action).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('该生命周期操作不可撤销')
+    await wrapper.get('[data-testid="confirm-close-order"]').trigger('click')
+    await flushPromises()
+    expect(salesOrderApi.action).toHaveBeenCalledWith('order-id', 'close', 2)
+    wrapper.unmount()
   })
 
   it('生命周期动作pending时阻止重复提交并回显服务端冲突追踪号', async () => {

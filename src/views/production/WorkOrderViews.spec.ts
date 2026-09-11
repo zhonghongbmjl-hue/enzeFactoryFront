@@ -307,6 +307,10 @@ describe('工单列表与详情', () => {
   })
 
   it('refreshes the completion gate when the process inspection changes', async () => {
+    vi.mocked(productionApi.get).mockResolvedValue({
+      ...workOrder,
+      status: 'IN_PRODUCTION',
+    })
     const wrapper = mount(WorkOrderDetailView)
     await flushPromises()
     const callsBeforeUpdate = vi.mocked(productionEvidenceApi.latest).mock.calls.length

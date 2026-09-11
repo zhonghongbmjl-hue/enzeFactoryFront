@@ -22,6 +22,13 @@ export interface OrderProgress {
   shipmentPercent: number
 }
 
+export interface OrderClosureReadiness {
+  allShipmentsSigned: boolean
+  observationPeriodEnded: boolean
+  allExceptionsClosed: boolean
+  canClose: boolean
+}
+
 export interface SalesOrderItem {
   id: string
   productId: string
@@ -102,6 +109,7 @@ export interface SalesOrder {
   bomSnapshots: OrderBomSnapshot[]
   requirements: MaterialRequirement[]
   progress: OrderProgress
+  closureReadiness?: OrderClosureReadiness | null
   history: OrderHistory[]
   submittedAt?: string
   approvedAt?: string

@@ -3,6 +3,7 @@ import SelectField from '@/components/form/SelectField.vue'
 import { computed, onUnmounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { shipmentApi } from '@/api/shipment'
+import { qualityApi } from '@/api/quality'
 import { createIdempotencyAttempt } from '@/api/http'
 import { useAuthStore } from '@/stores/auth'
 import type { DecimalString, Shipment, ShipmentOrderWorkspace } from '@/types/shipment'
@@ -12,6 +13,7 @@ import {
   isNonNegativeDecimal,
   isPositiveDecimal,
 } from '@/utils/decimal'
+import { formatQuantity, formatStatus, shortReference } from '@/utils/presentation'
 import {
   useShipmentMutationFlight,
   type ShipmentMutationFlight,
@@ -27,6 +29,7 @@ const error = ref('')
 const recoveryNotice = ref('')
 const boxNo = ref('')
 const qualityInspectionId = ref('')
+const qualityInspectionOptions = ref<Array<{ value: string; label: string }>>([])
 const packingQuantity = ref('')
 const selectedPackingItems = ref<Record<string, boolean>>({})
 const shipmentQuantity = ref<Record<string, string>>({})
@@ -71,6 +74,13 @@ const orderId = computed(() => String(route.params.orderId ?? ''))
 const canManage = computed(() => auth.permissions.has('SHIPMENT_MANAGE'))
 const canApprove = computed(() => auth.permissions.has('SHIPMENT_APPROVE'))
 const canAfterSales = computed(() => auth.permissions.has('AFTER_SALES_MANAGE'))
+const canPack = computed(
+  () =>
+    canManage.value &&
+    Boolean(workspace.value) &&
+    isPositiveDecimal(workspace.value!.packableQuantity) &&
+    qualityInspectionOptions.value.length > 0,
+)
 const eligibleAfterSalesLines = computed(() =>
   (workspace.value?.shipments ?? [])
     .filter((item) => item.status === 'SIGNED' && (item.source ?? 'NORMAL') === 'NORMAL')
@@ -103,6 +113,66 @@ const regularShipmentBoxes = computed(() => {
     return lines.length ? [{ ...box, lines }] : []
   })
 })
+const canCreateAfterSales = computed(
+  () =>
+    canAfterSales.value &&
+    Boolean(
+      eligibleAfterSalesLines.value.find((item) => item.line.id === afterSalesSourceId.value),
+    ) &&
+    isPositiveDecimal(afterSalesQuantity.value) &&
+    Boolean(afterSalesReason.value) &&
+    customerFeedback.value.trim().length > 0,
+)
+
+async function loadQualityInspectionOptions(salesOrderId: string) {
+  try {
+    const orderFacts = await qualityApi.aggregateOrder(salesOrderId)
+    const workOrderIds = orderFacts.items.flatMap((item) =>
+      item.workOrders.map((workOrder) => workOrder.workOrderId),
+    )
+    const aggregates = await Promise.all(workOrderIds.map((id) => qualityApi.aggregate(id)))
+    const seen = new Set<string>()
+    return aggregates.flatMap((aggregate) =>
+      aggregate.inspections.flatMap((inspection) => {
+        if (!isPositiveDecimal(inspection.passedQuantity) || seen.has(inspection.id)) return []
+        seen.add(inspection.id)
+        return [
+          {
+            value: inspection.id,
+            label: `检验 V${inspection.inspectionVersion} · 通过 ${formatQuantity(inspection.passedQuantity)} · 工单 ${shortReference(inspection.workOrderId)}`,
+          },
+        ]
+      }),
+    )
+  } catch {
+    return []
+  }
+}
+
+function knownInspectionOptions(value: ShipmentOrderWorkspace) {
+  const seen = new Set<string>()
+  return value.boxes.flatMap((box) =>
+    (box.lines ?? []).flatMap((line) => {
+      if (!line.qualityInspectionId || seen.has(line.qualityInspectionId)) return []
+      seen.add(line.qualityInspectionId)
+      return [
+        {
+          value: line.qualityInspectionId,
+          label: `已使用检验记录 ${shortReference(line.qualityInspectionId)} · 工单 ${shortReference(line.workOrderId)}`,
+        },
+      ]
+    }),
+  )
+}
+
+async function refreshQualityInspectionOptions(salesOrderId: string, token: number): Promise<void> {
+  const options = await loadQualityInspectionOptions(salesOrderId)
+  if (!active || token !== sequence || salesOrderId !== orderId.value || !options.length) return
+  qualityInspectionOptions.value = options
+  if (!options.some((option) => option.value === qualityInspectionId.value)) {
+    qualityInspectionId.value = options.length === 1 ? options[0]!.value : ''
+  }
+}
 function reconcileMisroutedAfterSalesFlight(value: ShipmentOrderWorkspace): void {
   const pending = flight.value as ShipmentMutationFlight | null
   if (
@@ -144,6 +214,12 @@ async function load(expectedFlight: ShipmentMutationFlight | null = null): Promi
     const value = await shipmentApi.orderWorkspace(requested)
     if (!active || token !== sequence || requested !== orderId.value) return false
     workspace.value = value
+    const knownOptions = knownInspectionOptions(value)
+    qualityInspectionOptions.value = knownOptions
+    if (!knownOptions.some((option) => option.value === qualityInspectionId.value)) {
+      qualityInspectionId.value = knownOptions.length === 1 ? knownOptions[0]!.value : ''
+    }
+    void refreshQualityInspectionOptions(requested, token)
     reconcileMisroutedAfterSalesFlight(value)
     if (expectedFlight && flightStore.claimRefresh(owner, expectedFlight)) {
       expectedFlight.attempt.succeeded()
@@ -376,7 +452,7 @@ onUnmounted(() => {
         <p>SHIPMENT CONTROL / 包装发运控制</p>
         <h1>包装与发运工作台</h1>
       </div>
-      <span class="order-chip">订单 {{ orderId }}</span>
+      <span class="order-chip" :title="orderId">订单 {{ shortReference(orderId) }}</span>
     </header>
     <el-alert v-if="error" :title="error" type="error" :closable="false" show-icon role="alert" />
     <el-alert
@@ -398,9 +474,9 @@ onUnmounted(() => {
       </el-button>
     </el-alert>
     <section v-if="workspace" class="facts" aria-label="包装数量守恒">
-      <strong>质量合格 {{ workspace.qualityPassedQuantity }}</strong
-      ><strong>已装箱 {{ workspace.packedQuantity }}</strong
-      ><strong>可包装 {{ workspace.packableQuantity }}</strong>
+      <strong>质量合格 {{ formatQuantity(workspace.qualityPassedQuantity) }}</strong
+      ><strong>已装箱 {{ formatQuantity(workspace.packedQuantity) }}</strong
+      ><strong>可包装 {{ formatQuantity(workspace.packableQuantity) }}</strong>
     </section>
     <section v-if="workspace" class="observation">
       <span>观察期基准：{{ workspace.observationBaseline?.slice(0, 10) || '待全部签收' }}</span
@@ -411,16 +487,32 @@ onUnmounted(() => {
       >
     </section>
     <section v-if="canManage && workspace" class="forms">
-      <el-form @submit.prevent="pack">
+      <el-form v-if="isPositiveDecimal(workspace.packableQuantity)" @submit.prevent="pack">
         <h2>质量合格品装箱</h2>
         <label>箱号<el-input v-model="boxNo" maxlength="80" /></label>
-        <label>质检批次 ID<el-input v-model="qualityInspectionId" maxlength="64" /></label>
+        <label
+          >质检批次<SelectField
+            v-model="qualityInspectionId"
+            aria-label="质检批次"
+            placeholder="选择已通过的质检批次"
+            filterable
+            :options="qualityInspectionOptions"
+        /></label>
         <label
           >装箱数量
           <el-input v-model="packingQuantity" inputmode="decimal" placeholder="0.000000" />
         </label>
-        <el-button type="primary" native-type="submit" :disabled="!!flight">确认装箱</el-button>
+        <p v-if="!qualityInspectionOptions.length" class="shipment-form-note" role="status">
+          暂未读取到可用质检批次，请先完成品质检验或刷新页面。
+        </p>
+        <el-button type="primary" native-type="submit" :disabled="!!flight || !canPack"
+          >确认装箱</el-button
+        >
       </el-form>
+      <div v-else class="completed-panel" role="status">
+        <h2>装箱已完成</h2>
+        <p>当前没有待装箱的质量合格品，可在下方查看包装箱与发运状态。</p>
+      </div>
       <el-form data-testid="create-shipment-form" @submit.prevent="createShipment">
         <h2>创建发运单</h2>
         <p v-if="hasAfterSalesRepackingBoxes" class="shipment-form-note" role="status">
@@ -438,7 +530,10 @@ onUnmounted(() => {
               :aria-label="`选择 SKU ${line.skuId}`"
               @update:model-value="selectedPackingItems[line.id] = Boolean($event)"
             />
-            <span>SKU {{ line.skuId }} / 可发余额 {{ line.remainingQuantity }}</span>
+            <span :title="line.skuId"
+              >SKU {{ shortReference(line.skuId) }} / 可发余额
+              {{ formatQuantity(line.remainingQuantity) }}</span
+            >
             <el-input
               v-model="shipmentQuantity[line.id]"
               :disabled="!selectedPackingItems[line.id]"
@@ -469,7 +564,7 @@ onUnmounted(() => {
             :options="
               eligibleAfterSalesLines.map((source) => ({
                 value: source.line.id,
-                label: `SKU ${source.line.skuId} / 已签收 ${source.line.signedQuantity}`,
+                label: `SKU ${shortReference(source.line.skuId)} / 已签收 ${formatQuantity(source.line.signedQuantity)}`,
               }))
             "
         /></label>
@@ -503,7 +598,7 @@ onUnmounted(() => {
           data-testid="create-after-sales"
           type="primary"
           native-type="submit"
-          :disabled="!!flight"
+          :disabled="!!flight || !canCreateAfterSales"
         >
           创建售后任务
         </el-button>
@@ -522,7 +617,8 @@ onUnmounted(() => {
         :key="item.id"
         :to="`/after-sales/${item.id}`"
       >
-        {{ item.reasonCode }} · {{ item.status }} · {{ item.quantity }}
+        {{ item.reasonCode }} · {{ formatStatus(item.status) }} ·
+        {{ formatQuantity(item.quantity) }}
       </RouterLink>
     </section>
     <section v-if="workspace" class="grid">
@@ -532,7 +628,7 @@ onUnmounted(() => {
       <article v-for="box in workspace.boxes" :key="box.id">
         <small>包装箱</small>
         <h2>{{ box.boxNo }}</h2>
-        <p>装箱数量 {{ box.totalQuantity }}</p>
+        <p>装箱数量 {{ formatQuantity(box.totalQuantity) }}</p>
       </article>
     </section>
     <section v-if="workspace?.shipments.length" class="shipments">
@@ -541,14 +637,21 @@ onUnmounted(() => {
       </p>
       <article v-for="item in workspace.shipments" :key="item.id">
         <div>
-          <small>{{ item.status }}</small>
-          <h2>发运单 {{ item.id }}</h2>
-          <p>申请人 {{ item.requesterId }}</p>
-          <p>审批人 {{ item.approverId || '待审批' }}</p>
+          <small>{{ formatStatus(item.status) }}</small>
+          <h2 :title="item.id">发运单 {{ shortReference(item.id) }}</h2>
+          <p :title="item.requesterId">申请人编号 {{ shortReference(item.requesterId) }}</p>
+          <p :title="item.approverId || ''">
+            审批人编号 {{ item.approverId ? shortReference(item.approverId) : '待审批' }}
+          </p>
         </div>
         <div v-for="line in item.lines" :key="line.id" class="progress">
-          <span>发运 {{ line.dispatchedQuantity }} / {{ line.plannedQuantity }}</span
-          ><span>签收 {{ line.signedQuantity }} / {{ line.plannedQuantity }}</span>
+          <span
+            >发运 {{ formatQuantity(line.dispatchedQuantity) }} /
+            {{ formatQuantity(line.plannedQuantity) }}</span
+          ><span
+            >签收 {{ formatQuantity(line.signedQuantity) }} /
+            {{ formatQuantity(line.plannedQuantity) }}</span
+          >
           <label
             v-if="
               canManage &&
@@ -697,6 +800,12 @@ form label,
 .shipment-form-note {
   line-height: 1.6;
   color: #6d5d45;
+}
+.completed-panel {
+  display: grid;
+  align-content: center;
+  min-height: 180px;
+  border-left: 4px solid var(--green-700, #287a61);
 }
 .shipments article {
   display: grid;

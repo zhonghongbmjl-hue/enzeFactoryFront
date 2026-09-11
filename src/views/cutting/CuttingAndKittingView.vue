@@ -11,6 +11,7 @@ import type { CuttingOrder, KittingCheck, KittingRelease } from '@/types/cutting
 import type { InventoryLedger } from '@/types/inventory'
 import type { SalesOrder, SalesOrderItem } from '@/types/order'
 import { addDecimal, compareDecimal, decimalPercent, isPositiveDecimal } from '@/utils/decimal'
+import { formatQuantity, formatStatus, shortReference } from '@/utils/presentation'
 
 const CLOSED_ORDER_STATUSES = new Set(['DRAFT', 'CANCELLED', 'COMPLETED'])
 
@@ -27,6 +28,8 @@ const failure = ref('')
 const traceId = ref('')
 const orders = ref<SalesOrder[]>([])
 const issues = ref<Array<{ id: string; issueNo: string; batchNo: string }>>([])
+const recentCuttings = ref<CuttingOrder[]>([])
+const recentKittings = ref<KittingCheck[]>([])
 const conservationOk = computed(
   () =>
     !cutting.value ||
@@ -77,6 +80,22 @@ const issueOptions = computed(() =>
     value: issue.id,
   })),
 )
+const cuttingTaskOptions = computed(() =>
+  recentCuttings.value.map((item) => ({
+    label: `${item.cuttingNo} · ${formatStatus(item.status)} · 批次 ${item.productionBatch}`,
+    value: item.id,
+  })),
+)
+const kittingTaskOptions = computed(() =>
+  recentKittings.value.map((item) => ({
+    label: `${formatOrderItemId(item.orderItemId)} · ${formatStatus(item.status)} · 可释放 ${formatQuantity(item.remainingQuantity)}`,
+    value: item.id,
+  })),
+)
+
+function upsertById<T extends { id: string }>(rows: T[], value: T): T[] {
+  return [value, ...rows.filter((item) => item.id !== value.id)].slice(0, 50)
+}
 
 function orderItemLabel(order: SalesOrder, item: SalesOrderItem): string {
   return `${order.orderNo} · ${item.color} / ${item.size} / ${item.fit}`
@@ -207,12 +226,19 @@ function onIssueChange(issueId: string): void {
   if (issue.batchNo) createForm.value.sourceFabricLot = issue.batchNo
 }
 
-async function loadCuttingOptions(): Promise<void> {
+async function loadWorkspaceOptions(): Promise<void> {
   try {
     const orderPage = await salesOrderApi.list({ page: 0, size: 50 })
     orders.value = orderPage.content.filter((order) => !CLOSED_ORDER_STATUSES.has(order.status))
+
+    const [cuttingResult, kittingResult] = await Promise.allSettled([
+      cuttingApi.list(),
+      kittingApi.list(),
+    ])
+    recentCuttings.value = cuttingResult.status === 'fulfilled' ? (cuttingResult.value ?? []) : []
+    recentKittings.value = kittingResult.status === 'fulfilled' ? (kittingResult.value ?? []) : []
   } catch (error) {
-    report(error, '裁剪选项加载失败')
+    report(error, '裁剪与齐套任务选项加载失败')
   }
 }
 
@@ -223,6 +249,7 @@ async function createCutting(): Promise<void> {
   const payload = { ...createForm.value }
   try {
     cutting.value = await cuttingApi.create(payload, createAttempt.keyFor(payload))
+    recentCuttings.value = upsertById(recentCuttings.value, cutting.value)
     createAttempt.succeeded()
     cuttingQuery.value = cutting.value.id
     ElMessage.success('裁剪任务已创建并锁定领布投入')
@@ -268,6 +295,7 @@ async function createKitting(): Promise<void> {
   failure.value = ''
   try {
     kitting.value = await kittingApi.check(checkForm.value)
+    recentKittings.value = upsertById(recentKittings.value, kitting.value)
     kittingQuery.value = kitting.value.id
     releases.value = await kittingApi.releases(kitting.value.id)
     ElMessage.success('已按裁片实绩与冻结辅料需求重算齐套')
@@ -289,6 +317,7 @@ async function loadCutting(): Promise<void> {
   failure.value = ''
   try {
     cutting.value = await cuttingApi.get(cuttingQuery.value.trim())
+    recentCuttings.value = upsertById(recentCuttings.value, cutting.value)
   } catch (error) {
     report(error, '裁剪任务加载失败')
   }
@@ -302,6 +331,7 @@ async function loadKitting(): Promise<void> {
       kittingApi.get(kittingQuery.value.trim()),
       kittingApi.releases(kittingQuery.value.trim()),
     ])
+    recentKittings.value = upsertById(recentKittings.value, kitting.value)
   } catch (error) {
     report(error, '齐套检查加载失败')
   }
@@ -312,6 +342,7 @@ async function transition(action: 'release' | 'start'): Promise<void> {
   pending.value = true
   try {
     cutting.value = await cuttingApi[action](cutting.value.id, cutting.value.version)
+    recentCuttings.value = upsertById(recentCuttings.value, cutting.value)
     ElMessage.success(action === 'release' ? '裁剪任务已下达' : '裁剪已开工')
   } catch (error) {
     report(error, '裁剪状态更新失败')
@@ -360,7 +391,7 @@ async function scheduleKitting(item: KittingRelease): Promise<void> {
   }
 }
 
-onMounted(loadCuttingOptions)
+onMounted(loadWorkspaceOptions)
 </script>
 
 <template>
@@ -460,10 +491,13 @@ onMounted(loadCuttingOptions)
         </el-form>
         <el-form class="query-strip" @submit.prevent="loadCutting">
           <label
-            >裁剪任务 ID<el-input
+            >裁剪任务<SelectField
               v-model="cuttingQuery"
               data-testid="cutting-query"
-              placeholder="输入 UUID"
+              aria-label="裁剪任务"
+              placeholder="选择最近裁剪任务"
+              filterable
+              :options="cuttingTaskOptions"
           /></label>
           <el-button data-testid="load-cutting" @click="loadCutting">读取</el-button>
         </el-form>
@@ -471,16 +505,16 @@ onMounted(loadCuttingOptions)
         <template v-if="cutting">
           <div class="state-line">
             <code>{{ cutting.cuttingNo }}</code
-            ><b :class="cutting.status.toLowerCase()">{{ cutting.status }}</b
+            ><b :class="cutting.status.toLowerCase()">{{ formatStatus(cutting.status) }}</b
             ><span>v{{ cutting.version }}</span>
           </div>
           <div class="equation-card" :class="{ invalid: !conservationOk }">
             <small>数量守恒</small><strong>领布投入 = 裁片产出 + 损耗 + 余料回库</strong>
             <div>
-              <b>{{ cutting.inputQuantity }}</b
-              ><span>=</span><b>{{ cutting.outputQuantity }}</b
-              ><span>+</span><b>{{ cutting.lossQuantity }}</b
-              ><span>+</span><b>{{ cutting.excessReturnQuantity }}</b>
+              <b>{{ formatQuantity(cutting.inputQuantity) }}</b
+              ><span>=</span><b>{{ formatQuantity(cutting.outputQuantity) }}</b
+              ><span>+</span><b>{{ formatQuantity(cutting.lossQuantity) }}</b
+              ><span>+</span><b>{{ formatQuantity(cutting.excessReturnQuantity) }}</b>
             </div>
           </div>
           <dl class="trace-grid">
@@ -644,10 +678,13 @@ onMounted(loadCuttingOptions)
         </el-form>
         <el-form class="query-strip" @submit.prevent="loadKitting">
           <label
-            >齐套检查 ID<el-input
+            >齐套检查<SelectField
               v-model="kittingQuery"
               data-testid="kitting-query"
-              placeholder="输入 UUID"
+              aria-label="齐套检查"
+              placeholder="选择最近齐套检查"
+              filterable
+              :options="kittingTaskOptions"
           /></label>
           <el-button data-testid="load-kitting" @click="loadKitting">读取</el-button>
         </el-form>

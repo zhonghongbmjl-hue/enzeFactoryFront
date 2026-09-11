@@ -253,17 +253,17 @@ describe('质量工作台', () => {
       query: { salesOrderId: SALES_ORDER_ID },
     })
     expect(wrapper.text()).toContain('生产完成账本')
-    expect(wrapper.text()).toContain('10.000000')
+    expect(wrapper.text()).toContain('生产完成账本10')
     expect(wrapper.text()).toContain('待后整')
-    expect(wrapper.text()).toContain('2.000000')
+    expect(wrapper.text()).toContain('可用 2')
     expect(wrapper.text()).toContain('唯一正式成品质检')
     expect(wrapper.text()).toContain('抽检')
     expect(wrapper.text()).toContain(INSPECTION_ID)
     expect(wrapper.text()).toContain(REWORK_ID)
     expect(wrapper.text()).toContain(`来源检验 ${INSPECTION_ID}`)
-    expect(wrapper.text()).toContain(`SKU ${SKU_ID}`)
-    expect(wrapper.text()).toContain(`批次 ${PRODUCTION_BATCH_ID}`)
-    expect(wrapper.text()).toContain('主状态 APPROVED')
+    expect(wrapper.get(`[title="${SKU_ID}"]`).text()).toContain('SKU 6afc17de…')
+    expect(wrapper.get(`[title="${PRODUCTION_BATCH_ID}"]`).text()).toContain('批次 48daf5bc…')
+    expect(wrapper.text()).toContain('主状态 已审批')
   })
 
   it('shows pending disposition and loads bounded history pages with the selected work order', async () => {
@@ -348,8 +348,8 @@ describe('质量工作台', () => {
     oldResponse.resolve({ ...orderAggregate, passedQuantity: '1.000000' })
     await flushPromises()
 
-    expect(wrapper.text()).toContain('8.000000')
-    expect(wrapper.text()).not.toContain('1.000000')
+    expect(wrapper.text()).toContain('正式通过 / 待返工8')
+    expect(wrapper.text()).not.toContain('正式通过 / 待返工1')
   })
 
   it('同一订单刷新时保留当前内容，避免接口期间整页闪烁', async () => {
@@ -367,7 +367,7 @@ describe('质量工作台', () => {
     refreshed.resolve({ ...orderAggregate, passedQuantity: '5.000000' })
     await flushPromises()
 
-    expect(wrapper.text()).toContain('5.000000')
+    expect(wrapper.text()).toContain('正式通过 / 待返工5')
   })
 
   it('submits split quantities and completes the selected rework with idempotency keys', async () => {

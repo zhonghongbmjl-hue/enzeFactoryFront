@@ -14,6 +14,7 @@ vi.mock('@/api/cutting', () => ({
     complete: vi.fn(),
     release: vi.fn(),
     start: vi.fn(),
+    list: vi.fn(),
   },
 }))
 vi.mock('@/api/kitting', () => ({
@@ -23,6 +24,7 @@ vi.mock('@/api/kitting', () => ({
     release: vi.fn(),
     schedule: vi.fn(),
     check: vi.fn(),
+    list: vi.fn(),
   },
 }))
 vi.mock('@/api/inventory', () => ({
@@ -44,6 +46,14 @@ const SelectFieldStub = {
     :disabled="disabled"
     @change="$emit('update:modelValue', $event.target.value); $emit('change', $event.target.value)"
   ><option value=""></option><option v-for="item in options" :key="String(item.value)" :value="item.value">{{ item.label }}</option></select>`,
+}
+
+function selectField(wrapper: ReturnType<typeof mount>, testId: string) {
+  const field = wrapper
+    .findAllComponents({ name: 'SelectField' })
+    .find((item) => item.props('dataTestid') === testId)
+  if (!field) throw new Error(`SelectField [data-testid="${testId}"] not found`)
+  return field
 }
 
 describe('裁剪与齐套工作台', () => {
@@ -91,6 +101,8 @@ describe('裁剪与齐套工作台', () => {
       version: 1,
     })
     vi.mocked(kittingApi.releases).mockResolvedValue([])
+    vi.mocked(cuttingApi.list).mockResolvedValue([])
+    vi.mocked(kittingApi.list).mockResolvedValue([])
     const listedOrder = {
       id: 'order-id',
       orderNo: 'PO-001',
@@ -135,9 +147,9 @@ describe('裁剪与齐套工作台', () => {
 
   it('并列显示裁剪来源链、数量守恒和齐套最小值', async () => {
     const wrapper = mount(CuttingAndKittingView)
-    await wrapper.get('[data-testid="cutting-query"]').setValue('cut-id')
+    selectField(wrapper, 'cutting-query').vm.$emit('update:modelValue', 'cut-id')
     await wrapper.get('[data-testid="load-cutting"]').trigger('click')
-    await wrapper.get('[data-testid="kitting-query"]').setValue('check-id')
+    selectField(wrapper, 'kitting-query').vm.$emit('update:modelValue', 'check-id')
     await wrapper.get('[data-testid="load-kitting"]').trigger('click')
     await flushPromises()
 
@@ -155,7 +167,7 @@ describe('裁剪与齐套工作台', () => {
 
     expect(wrapper.find('[data-testid="create-cutting-form"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="create-kitting-form"]').exists()).toBe(true)
-    await wrapper.get('[data-testid="cutting-query"]').setValue('cut-id')
+    selectField(wrapper, 'cutting-query').vm.$emit('update:modelValue', 'cut-id')
     await wrapper.get('[data-testid="load-cutting"]').trigger('click')
     await flushPromises()
     expect(wrapper.find('[data-testid="complete-cutting-form"]').exists()).toBe(true)
@@ -183,7 +195,7 @@ describe('裁剪与齐套工作台', () => {
       version: 1,
     })
     const wrapper = mount(CuttingAndKittingView)
-    await wrapper.get('[data-testid="kitting-query"]').setValue('check-id')
+    selectField(wrapper, 'kitting-query').vm.$emit('update:modelValue', 'check-id')
     await wrapper.get('[data-testid="load-kitting"]').trigger('click')
     await flushPromises()
 
@@ -214,7 +226,7 @@ describe('裁剪与齐套工作台', () => {
         version: 0,
       })
     const wrapper = mount(CuttingAndKittingView)
-    await wrapper.get('[data-testid="kitting-query"]').setValue('check-id')
+    selectField(wrapper, 'kitting-query').vm.$emit('update:modelValue', 'check-id')
     await wrapper.get('[data-testid="load-kitting"]').trigger('click')
     await flushPromises()
 

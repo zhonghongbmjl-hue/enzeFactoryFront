@@ -224,14 +224,14 @@ describe('包装发运与售后返工工作台', () => {
   it('展示后端权威的可包装量、装箱守恒、审批身份、部分发运签收和观察截止', async () => {
     permissions(['SHIPMENT_VIEW'])
     const wrapper = await renderShipment()
-    expect(wrapper.text()).toContain('质量合格 10.000000')
-    expect(wrapper.text()).toContain('已装箱 8.000000')
-    expect(wrapper.text()).toContain('可包装 2.000000')
+    expect(wrapper.text()).toContain('质量合格 10')
+    expect(wrapper.text()).toContain('已装箱 8')
+    expect(wrapper.text()).toContain('可包装 2')
     expect(wrapper.text()).toContain('BOX-001')
-    expect(wrapper.text()).toContain('申请人 user-requester')
-    expect(wrapper.text()).toContain('审批人 user-approver')
-    expect(wrapper.text()).toContain('发运 5.000000 / 8.000000')
-    expect(wrapper.text()).toContain('签收 3.000000 / 8.000000')
+    expect(wrapper.text()).toContain('申请人编号 user-req…')
+    expect(wrapper.text()).toContain('审批人编号 user-app…')
+    expect(wrapper.text()).toContain('发运 5 / 8')
+    expect(wrapper.text()).toContain('签收 3 / 8')
     expect(wrapper.text()).toContain('2026-09-01')
     expect(wrapper.find(`[data-testid="approve-${SHIPMENT}"]`).exists()).toBe(false)
   })
@@ -525,8 +525,11 @@ describe('包装发运与售后返工工作台', () => {
   it('售后视图把原始血缘只读展示并呈现完整状态轨道', async () => {
     permissions(['SHIPMENT_VIEW'])
     const wrapper = await renderAfterSales()
-    for (const fact of [ORDER, 'sku-1', 'batch-1', 'work-order-1', BOX_1, SHIPMENT]) {
+    for (const fact of ['sku-1', 'batch-1', 'work-order-1']) {
       expect(wrapper.text()).toContain(fact)
+    }
+    for (const reference of [ORDER, BOX_1, SHIPMENT]) {
+      expect(wrapper.find(`[title="${reference}"]`).exists()).toBe(true)
     }
     expect(wrapper.findAll('[data-testid="immutable-lineage"] input')).toHaveLength(0)
     for (const label of [
@@ -626,8 +629,8 @@ describe('包装发运与售后返工工作台', () => {
       effectiveNextPermission: 'PRODUCTION_MANAGE',
     } as never)
     const betweenAttempts = await renderAfterSales()
-    expect(betweenAttempts.text()).toContain('累计合格 1.000000')
-    expect(betweenAttempts.text()).toContain('剩余待处理 1.000000')
+    expect(betweenAttempts.text()).toContain('累计合格 1')
+    expect(betweenAttempts.text()).toContain('剩余待处理 1')
     expect(betweenAttempts.get('[data-testid="after-sales-next-action"]').text()).toContain(
       '开始下一轮返工',
     )

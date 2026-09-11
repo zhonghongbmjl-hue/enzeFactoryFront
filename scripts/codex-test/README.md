@@ -12,7 +12,7 @@ The suite keeps running after individual failures and writes a summary to `artif
 
 ## Useful environment variables
 
-- `GARMENT_E2E_API_BASE_URL`: Backend API base URL. Defaults to `http://127.0.0.1:8080/api/v1`.
+- `GARMENT_E2E_API_BASE_URL`: Backend API base URL. Defaults to `http://127.0.0.1:18080/api/v1`.
 - `GARMENT_E2E_UI_BASE_URL`: UI URL. Defaults to `http://localhost:5173`.
 - `GARMENT_E2E_TENANT_CODE`: Login tenant code. Defaults to `demo`.
 - `GARMENT_E2E_ADMIN_USERNAME`: Login username. Defaults to `admin`.

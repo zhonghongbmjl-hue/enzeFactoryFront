@@ -6,6 +6,7 @@ import { createIdempotencyAttempt } from '@/api/http'
 import type { ProductionReport, ProductionReportInput, WorkOrder } from '@/types/production'
 import ProcessInspectionPanel from './ProcessInspectionPanel.vue'
 import CompletionGateStatus from '@/components/production/CompletionGateStatus.vue'
+import { formatDateTime, formatQuantity, shortReference } from '@/utils/presentation'
 
 const route = useRoute()
 const workOrder = ref<WorkOrder | null>(null)
@@ -51,6 +52,7 @@ const steps = [
   ['IN_PRODUCTION', '生产中'],
   ['PROCESS_INSPECTION', '过程初检'],
   ['READY_TO_COMPLETE', '待完工'],
+  ['COMPLETED', '已完工'],
 ] as const
 
 const currentStep = computed(() => {
@@ -217,7 +219,9 @@ onMounted(load)
       <div>
         <p>WORK ORDER / {{ workOrder.productionBatch.plannedBatchCode }}</p>
         <h1>{{ workOrder.workOrderNo }}</h1>
-        <span>产线 {{ workOrder.productionLineId }}</span>
+        <span :title="workOrder.productionLineId"
+          >产线编号 {{ shortReference(workOrder.productionLineId) }}</span
+        >
       </div>
       <div class="actions">
         <el-button
@@ -267,31 +271,34 @@ onMounted(load)
 
     <div class="metrics">
       <article>
-        <small>计划数量</small><strong>{{ workOrder.plannedQuantity }}</strong>
+        <small>计划数量</small><strong>{{ formatQuantity(workOrder.plannedQuantity) }}</strong>
       </article>
       <article>
-        <small>累计投入</small><strong>{{ workOrder.totalInputQuantity }}</strong>
+        <small>累计投入</small><strong>{{ formatQuantity(workOrder.totalInputQuantity) }}</strong>
       </article>
       <article>
-        <small>累计良品</small><strong>{{ workOrder.totalGoodQuantity }}</strong>
+        <small>累计良品</small><strong>{{ formatQuantity(workOrder.totalGoodQuantity) }}</strong>
       </article>
       <article>
-        <small>累计不良</small><strong>{{ workOrder.totalDefectQuantity }}</strong>
+        <small>累计不良</small><strong>{{ formatQuantity(workOrder.totalDefectQuantity) }}</strong>
       </article>
       <article>
-        <small>返工路由</small><strong>{{ workOrder.totalReworkQuantity }}</strong>
+        <small>返工路由</small><strong>{{ formatQuantity(workOrder.totalReworkQuantity) }}</strong>
       </article>
       <article>
-        <small>当前在制</small><strong>{{ workOrder.workInProgressQuantity }}</strong>
+        <small>当前在制</small
+        ><strong>{{ formatQuantity(workOrder.workInProgressQuantity) }}</strong>
       </article>
       <article>
-        <small>待返工余额</small><strong>{{ workOrder.reworkPendingQuantity }}</strong>
+        <small>待返工余额</small
+        ><strong>{{ formatQuantity(workOrder.reworkPendingQuantity) }}</strong>
       </article>
       <article>
-        <small>已批准报废</small><strong>{{ workOrder.approvedScrapQuantity }}</strong>
+        <small>已批准报废</small
+        ><strong>{{ formatQuantity(workOrder.approvedScrapQuantity) }}</strong>
       </article>
       <article>
-        <small>未开工</small><strong>{{ workOrder.unstartedQuantity }}</strong>
+        <small>未开工</small><strong>{{ formatQuantity(workOrder.unstartedQuantity) }}</strong>
       </article>
     </div>
 
@@ -355,12 +362,14 @@ onMounted(load)
         <h2>不可变报工流水</h2>
         <article v-for="entry in reports" :key="entry.id">
           <div>
-            <b>{{ entry.reportedAt }}</b
+            <b>{{ formatDateTime(entry.reportedAt) }}</b
             ><small>{{ entry.operator }} · {{ entry.team }}</small>
           </div>
           <code
-            >投入 {{ entry.inputQuantity }} / 良 {{ entry.goodQuantity }} / 不良
-            {{ entry.defectQuantity }} / 在制 {{ entry.closingWorkInProgressQuantity }}</code
+            >投入 {{ formatQuantity(entry.inputQuantity) }} / 良
+            {{ formatQuantity(entry.goodQuantity) }} / 不良
+            {{ formatQuantity(entry.defectQuantity) }} / 在制
+            {{ formatQuantity(entry.closingWorkInProgressQuantity) }}</code
           >
         </article>
         <p v-if="reports.length === 0">尚无报工记录。</p>
@@ -381,12 +390,26 @@ onMounted(load)
         </nav>
       </section>
     </div>
+    <el-alert
+      v-if="['COMPLETED', 'CLOSED'].includes(workOrder.status)"
+      title="该生产工单已完成"
+      description="当前页面为只读归档状态，可继续查看数量汇总、报工流水与质量记录。"
+      type="success"
+      :closable="false"
+      show-icon
+    />
     <ProcessInspectionPanel
+      v-if="['RELEASED', 'IN_PRODUCTION', 'PROCESS_INSPECTION'].includes(workOrder.status)"
       :work-order-id="workOrder.id"
       :work-order-status="workOrder.status"
       @inspection-updated="completionGate?.refresh()"
     />
-    <CompletionGateStatus ref="completionGate" :work-order="workOrder" @completed="load" />
+    <CompletionGateStatus
+      v-if="workOrder.status === 'IN_PRODUCTION'"
+      ref="completionGate"
+      :work-order="workOrder"
+      @completed="load"
+    />
     <el-alert
       v-if="errorMessage"
       :title="errorMessage"

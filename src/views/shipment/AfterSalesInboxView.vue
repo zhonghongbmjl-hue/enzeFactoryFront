@@ -2,6 +2,7 @@
 import SelectField from '@/components/form/SelectField.vue'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { shipmentApi } from '@/api/shipment'
+import { salesOrderApi } from '@/api/orders'
 import { createIdempotencyAttempt } from '@/api/http'
 import { useAuthStore } from '@/stores/auth'
 import type {
@@ -13,6 +14,8 @@ import type {
   Page,
 } from '@/types/shipment'
 import { isPositiveDecimal } from '@/utils/decimal'
+import { formatQuantity, formatStatus, shortReference } from '@/utils/presentation'
+import type { SalesOrder } from '@/types/order'
 import {
   useShipmentMutationFlight,
   type ShipmentMutationFlight,
@@ -30,6 +33,7 @@ const exceptionSize = 20
 const error = ref('')
 const loading = ref(false)
 const orderId = ref('')
+const salesOrders = ref<SalesOrder[]>([])
 const category = ref<ExceptionCategory>('CUSTOMER_CLAIM')
 const referenceNo = ref('')
 const description = ref('')
@@ -44,6 +48,12 @@ let sequence = 0
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const canManage = computed(() => auth.permissions.has('AFTER_SALES_MANAGE'))
+const orderOptions = computed(() =>
+  salesOrders.value.map((order) => ({
+    value: order.id,
+    label: `${order.orderNo} · ${order.customerName} · ${formatStatus(order.status)}`,
+  })),
+)
 
 function currentScope(): ShipmentMutationScope | null {
   return auth.profile
@@ -63,6 +73,22 @@ function invalidText(value: string, max: number): boolean {
       return code !== undefined && (code <= 31 || code === 127)
     })
   )
+}
+const canOpenException = computed(
+  () =>
+    canManage.value &&
+    uuidPattern.test(orderId.value) &&
+    !invalidText(referenceNo.value, 80) &&
+    !invalidText(description.value, 500) &&
+    isPositiveDecimal(affectedQuantity.value),
+)
+
+async function loadOrderOptions(): Promise<void> {
+  try {
+    salesOrders.value = (await salesOrderApi.list({ page: 0, size: 100 })).content
+  } catch {
+    salesOrders.value = []
+  }
 }
 function resolution(value: ExceptionCase): {
   resolutionCode: string
@@ -203,7 +229,10 @@ flightStore.activate(owner)
 const initialScope = currentScope()
 flightStore.setScope(initialScope)
 const recovered = initialScope ? flightStore.syncFromStorage(initialScope, attempt) : null
-onMounted(() => void load(recovered?.status === 'CONFIRMED_PENDING_REFRESH' ? recovered : null))
+onMounted(() => {
+  void load(recovered?.status === 'CONFIRMED_PENDING_REFRESH' ? recovered : null)
+  void loadOrderOptions()
+})
 watch(
   () => [auth.profile?.tenantId, auth.profile?.userId, auth.generation] as const,
   () => {
@@ -215,6 +244,7 @@ watch(
     flightStore.setScope(currentScope())
     flightStore.activate(owner)
     void load()
+    void loadOrderOptions()
   },
   { flush: 'sync' },
 )
@@ -265,8 +295,11 @@ onUnmounted(() => {
           :to="`/after-sales/${item.id}`"
         >
           <b>{{ item.customerFeedback }}</b>
-          <span>{{ item.status }} · {{ item.quantity }}</span>
-          <small>订单 {{ item.salesOrderId }} / SKU {{ item.skuId }}</small>
+          <span>{{ formatStatus(item.status) }} · {{ formatQuantity(item.quantity) }}</span>
+          <small :title="`${item.salesOrderId} / ${item.skuId}`"
+            >订单 {{ shortReference(item.salesOrderId) }} / SKU
+            {{ shortReference(item.skuId) }}</small
+          >
         </RouterLink>
       </div>
       <p v-else class="empty">当前页没有售后任务。</p>
@@ -301,7 +334,13 @@ onUnmounted(() => {
         @submit.prevent="openException"
       >
         <label
-          >订单 ID<el-input v-model.trim="orderId" data-testid="exception-order-id" maxlength="36"
+          >销售订单<SelectField
+            v-model="orderId"
+            data-testid="exception-order-id"
+            aria-label="销售订单"
+            placeholder="搜索订单号或客户"
+            filterable
+            :options="orderOptions"
         /></label>
         <label
           >异常类别
@@ -334,7 +373,7 @@ onUnmounted(() => {
             maxlength="500"
           />
         </label>
-        <el-button type="primary" native-type="submit" :disabled="!!flight || !canManage"
+        <el-button type="primary" native-type="submit" :disabled="!!flight || !canOpenException"
           >登记异常</el-button
         >
       </form>
@@ -342,7 +381,7 @@ onUnmounted(() => {
         <article v-for="item in exceptionPage.items" :key="item.id">
           <div>
             <b>{{ item.referenceNo }}</b
-            ><span>{{ item.category }} · {{ item.affectedQuantity }}</span>
+            ><span>{{ item.category }} · {{ formatQuantity(item.affectedQuantity) }}</span>
             <p>{{ item.description }}</p>
           </div>
           <label

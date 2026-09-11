@@ -6,6 +6,7 @@ import { bomApi, productApi } from '@/api/products'
 import { ApiClientError } from '@/api/http'
 import { useAuthStore } from '@/stores/auth'
 import type { BomPage, BomSummary, Product, ProductInput, Sku, SkuInput } from '@/types/product'
+import { formatStatus } from '@/utils/presentation'
 
 const route = useRoute()
 const router = useRouter()
@@ -195,7 +196,7 @@ onMounted(load)
       </div>
       <div class="ticket-actions">
         <span class="product-state" :class="product.status.toLowerCase()">{{
-          product.status
+          formatStatus(product.status)
         }}</span>
         <el-button
           v-if="canManage && product.status === 'DRAFT'"
@@ -324,7 +325,9 @@ onMounted(load)
             <span
               ><b>{{ bom.versionNo }}</b
               ><small>{{ bom.name }}</small></span
-            ><span class="product-state" :class="bom.status.toLowerCase()">{{ bom.status }}</span
+            ><span class="product-state" :class="bom.status.toLowerCase()">{{
+              formatStatus(bom.status)
+            }}</span
             ><RouterLink :to="{ name: 'bom-editor', params: { bomId: bom.id } }"
               >展开物料表</RouterLink
             >

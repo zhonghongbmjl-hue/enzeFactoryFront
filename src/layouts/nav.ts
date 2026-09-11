@@ -18,6 +18,7 @@ export interface AdminNavItem {
   label: string
   ariaLabel: string
   icon: Component
+  groupLabel?: string
   visible: (permissions: ReadonlySet<string>) => boolean
 }
 
@@ -28,6 +29,7 @@ export const ADMIN_NAV_ITEMS: readonly AdminNavItem[] = [
     label: '履约总览',
     ariaLabel: '履约总览',
     icon: DataBoard,
+    groupLabel: '总览',
     visible: (permissions) => permissions.has('ORDER_VIEW'),
   },
   {
@@ -36,6 +38,7 @@ export const ADMIN_NAV_ITEMS: readonly AdminNavItem[] = [
     label: '基础资料',
     ariaLabel: '基础资料',
     icon: Notebook,
+    groupLabel: '基础资料',
     visible: (permissions) => permissions.has('MASTERDATA_VIEW'),
   },
   {
@@ -52,6 +55,7 @@ export const ADMIN_NAV_ITEMS: readonly AdminNavItem[] = [
     label: '订单履约',
     ariaLabel: '订单履约',
     icon: Document,
+    groupLabel: '订单履约',
     visible: (permissions) => permissions.has('ORDER_VIEW'),
   },
   {
@@ -60,6 +64,7 @@ export const ADMIN_NAV_ITEMS: readonly AdminNavItem[] = [
     label: '库存领退',
     ariaLabel: '库存与领退料',
     icon: Box,
+    groupLabel: '生产执行',
     visible: (permissions) => permissions.has('INVENTORY_MANAGE'),
   },
   {
@@ -100,6 +105,7 @@ export const ADMIN_NAV_ITEMS: readonly AdminNavItem[] = [
     label: '售后待办',
     ariaLabel: '售后待办',
     icon: Headset,
+    groupLabel: '交付售后',
     visible: (permissions) => permissions.has('AFTER_SALES_MANAGE'),
   },
 ]

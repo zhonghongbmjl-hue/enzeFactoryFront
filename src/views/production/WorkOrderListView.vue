@@ -9,6 +9,7 @@ import { createIdempotencyAttempt } from '@/api/http'
 import { WORK_ORDER_PAGE_SIZE, useWorkOrderListStore } from '@/stores/workOrders'
 import type { ProductionPlan } from '@/types/planning'
 import type { WorkOrderSummary } from '@/types/production'
+import { formatQuantity, shortReference } from '@/utils/presentation'
 
 const route = useRoute()
 const workOrders = useWorkOrderListStore()
@@ -137,9 +138,7 @@ defineExpose({ load })
           <strong>请先选择已审批排产</strong>
           <small>从生产排产页进入后，计划会自动带入并可在刷新后恢复。</small>
         </div>
-        <RouterLink class="plan-entry-link" :to="{ name: 'production' }">
-          前往生产排产
-        </RouterLink>
+        <RouterLink class="plan-entry-link" :to="{ name: 'production' }"> 前往生产排产 </RouterLink>
       </div>
       <el-form-item v-if="selectedPlan" label="已审批排程">
         <SelectField
@@ -196,10 +195,12 @@ defineExpose({ load })
         </el-table-column>
         <el-table-column label="产线" min-width="120">
           <template #default="{ row }">
-            <code>{{ row.productionLineId }}</code>
+            <code :title="row.productionLineId">{{ shortReference(row.productionLineId) }}</code>
           </template>
         </el-table-column>
-        <el-table-column label="计划量" prop="plannedQuantity" width="100" />
+        <el-table-column label="计划量" width="100">
+          <template #default="{ row }">{{ formatQuantity(row.plannedQuantity) }}</template>
+        </el-table-column>
         <el-table-column label="生产窗口" min-width="200">
           <template #default="{ row }">
             {{ row.productionBatch.startDate }} → {{ row.productionBatch.endDate }}
@@ -207,8 +208,8 @@ defineExpose({ load })
         </el-table-column>
         <el-table-column label="进度" min-width="140">
           <template #default="{ row }">
-            <b>{{ row.totalGoodQuantity }}</b>
-            <small>良品 / 在制 {{ row.workInProgressQuantity }}</small>
+            <b>{{ formatQuantity(row.totalGoodQuantity) }}</b>
+            <small>良品 / 在制 {{ formatQuantity(row.workInProgressQuantity) }}</small>
           </template>
         </el-table-column>
         <template #empty>暂无工单，从已审批排程开始。</template>
@@ -219,7 +220,9 @@ defineExpose({ load })
         <header>
           <div>
             <code>{{ row.workOrderNo }}</code
-            ><small>{{ row.productionLineId }}</small>
+            ><small :title="row.productionLineId"
+              >产线 {{ shortReference(row.productionLineId) }}</small
+            >
           </div>
           <el-tag size="small">{{ statusLabel[row.status] }}</el-tag>
         </header>
@@ -230,7 +233,7 @@ defineExpose({ load })
           </div>
           <div>
             <dt>计划量</dt>
-            <dd>{{ row.plannedQuantity }}</dd>
+            <dd>{{ formatQuantity(row.plannedQuantity) }}</dd>
           </div>
           <div>
             <dt>生产窗口</dt>
@@ -238,7 +241,10 @@ defineExpose({ load })
           </div>
           <div>
             <dt>良品 / 在制</dt>
-            <dd>{{ row.totalGoodQuantity }} / {{ row.workInProgressQuantity }}</dd>
+            <dd>
+              {{ formatQuantity(row.totalGoodQuantity) }} /
+              {{ formatQuantity(row.workInProgressQuantity) }}
+            </dd>
           </div>
         </dl>
         <footer>
@@ -300,7 +306,7 @@ button {
   cursor: pointer;
 }
 button:disabled {
-  cursor: wait;
+  cursor: not-allowed;
   opacity: 0.6;
 }
 .convert-panel {

@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import { ORDER_STATUS_LABELS } from '@/types/order'
 import type { DeliveryRisk, OrderControlTowerRow } from '@/types/dashboard'
+import { formatDateTime } from '@/utils/presentation'
 
 const props = defineProps<{ order: OrderControlTowerRow }>()
 
@@ -93,7 +94,9 @@ function rate(value: number): string {
     </dl>
 
     <footer>
-      <span v-if="order.lastSelfInspectionAt">最后自检 {{ order.lastSelfInspectionAt }}</span>
+      <span v-if="order.lastSelfInspectionAt"
+        >最后自检 {{ formatDateTime(order.lastSelfInspectionAt) }}</span
+      >
       <span v-else>尚无自检记录</span>
       <RouterLink :to="`/orders/${order.orderId}`">进入订单 →</RouterLink>
     </footer>

@@ -79,6 +79,7 @@ const canOpen = computed(
   () => canStart.value || needsRecovery.value || Boolean(purchaseOrder.value),
 )
 const openLabel = computed(() => {
+  if (props.plan.status === 'COMPLETED') return '查看采购与来料'
   if (!purchaseOrder.value) {
     return needsRecovery.value ? '继续办理采购与来料' : '办理采购与来料'
   }

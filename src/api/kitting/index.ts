@@ -6,6 +6,9 @@ import type { DecimalString } from '@/utils/decimal'
 export function createKittingApi(client: AxiosInstance) {
   const request = createApiRequest(client)
   return {
+    async list(limit = 50): Promise<KittingCheck[]> {
+      return request.get<KittingCheck[]>('/kitting-checks', { params: { limit } })
+    },
     async check(input: { orderItemId: string; skuId: string }): Promise<KittingCheck> {
       return request.post<KittingCheck>('/kitting-checks', input)
     },

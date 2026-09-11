@@ -218,7 +218,7 @@ onMounted(load)
   <section class="order-page">
     <header class="product-heading">
       <div>
-        <p class="eyebrow">PO CONTROL / 订单履约</p>
+        <p class="eyebrow">SALES ORDER CONTROL / 订单履约</p>
         <h1>订单履约台账</h1>
         <p>主状态用于业务管控，物料、生产、质量和交付进度独立记录。</p>
       </div>
@@ -424,12 +424,7 @@ onMounted(load)
         <div v-for="(item, index) in form.items" :key="index" class="order-line-draft">
           <header>
             <span>订单行 {{ index + 1 }}</span>
-            <el-button
-              v-if="form.items.length > 1"
-              link
-              type="primary"
-              @click="removeItem(index)"
-            >
+            <el-button v-if="form.items.length > 1" link type="primary" @click="removeItem(index)">
               移除
             </el-button>
           </header>
@@ -482,7 +477,9 @@ onMounted(load)
             <el-input v-model.number="item.unitPrice" type="number" min="0" step="0.01" />
           </el-form-item>
         </div>
-        <el-button class="table-action" link type="primary" @click="addItem">＋ 添加订单行</el-button>
+        <el-button class="table-action" link type="primary" @click="addItem"
+          >＋ 添加订单行</el-button
+        >
         <el-form-item>
           <el-button
             type="primary"
