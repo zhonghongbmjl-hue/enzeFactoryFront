@@ -54,6 +54,7 @@ describe('管理台菜单权限', () => {
     const wrapper = mount(AdminLayout, { global: { plugins: [pinia, router] } })
 
     expect(wrapper.get('[aria-label="售后待办"]').exists()).toBe(true)
+    expect(wrapper.find('.navigation-group-label').exists()).toBe(false)
     expect(wrapper.find('.el-menu-item-group__title').exists()).toBe(false)
     expect(wrapper.find('[aria-label="订单履约"]').exists()).toBe(false)
     expect(wrapper.find('[aria-label="包装发运与售后（按订单进入）"]').exists()).toBe(false)

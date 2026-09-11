@@ -891,6 +891,32 @@ export function inspectProcess(pid, platform = process.platform) {
       return undefined
     }
   }
+  if (platform === 'darwin') {
+    const found = spawnSync(
+      'ps',
+      ['-p', String(pid), '-o', 'pid=,ppid=,pgid=,lstart=,command='],
+      { encoding: 'utf8' },
+    )
+    if (found.status !== 0 || !found.stdout.trim()) return undefined
+    const matched = found.stdout
+      .trim()
+      .match(
+        /^(\d+)\s+(\d+)\s+(\d+)\s+([A-Z][a-z]{2}\s+[A-Z][a-z]{2}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2}\s+\d{4})\s+(.+)$/,
+      )
+    if (!matched) return undefined
+    const executable = spawnSync('ps', ['-p', String(pid), '-o', 'comm='], {
+      encoding: 'utf8',
+    })
+    return {
+      pid: Number(matched[1]),
+      parentPid: Number(matched[2]),
+      processGroupId: Number(matched[3]),
+      sessionId: null,
+      startedAt: Date.parse(matched[4]),
+      commandLine: matched[5],
+      executable: executable.status === 0 ? executable.stdout.trim() : '',
+    }
+  }
   try {
     const stat = readFileSync(`/proc/${pid}/stat`, 'utf8')
     const matched = stat.match(/^\d+ \(.+\) \S (\d+) (\d+) (\d+)/)

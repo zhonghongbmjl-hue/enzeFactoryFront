@@ -1,5 +1,6 @@
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { clearInterval, setInterval } from 'node:timers'
+import { fileURLToPath } from 'node:url'
 import {
   acquireOrRecoverRunLock,
   atomicWriteState,
@@ -26,6 +27,7 @@ import {
 } from './e2e-launcher.mjs'
 
 const projectDirectory = projectRoot(import.meta.url)
+const supportDirectory = dirname(fileURLToPath(import.meta.url))
 const toolchain = resolveToolchain(projectDirectory)
 
 if (process.argv.includes('--dry-run')) {
@@ -134,13 +136,7 @@ process.once('exit', () => {
 try {
   const composeMarker = `garment.e2e.run-token=${runToken}`
   const composeEnvironment = dependencyComposeEnvironment()
-  const commandWrapper = join(
-    projectDirectory,
-    'frontend',
-    'e2e',
-    'support',
-    'e2e-command-wrapper.mjs',
-  )
+  const commandWrapper = join(supportDirectory, 'e2e-command-wrapper.mjs')
   await runChecked(
     process.execPath,
     [

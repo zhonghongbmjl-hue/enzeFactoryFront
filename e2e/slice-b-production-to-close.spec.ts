@@ -63,6 +63,31 @@ async function uploadEvidence(
   }
 }
 
+async function selectComboboxOption(
+  page: Page,
+  label: string | RegExp,
+  optionName: string | RegExp,
+): Promise<void> {
+  await page.getByRole('combobox', { name: label }).click({ force: true })
+  await page
+    .locator('.el-select-dropdown:visible')
+    .getByRole('option', { name: optionName })
+    .first()
+    .click()
+}
+
+async function selectByTestId(
+  page: Page,
+  testId: string,
+  optionName?: string | RegExp,
+): Promise<void> {
+  await page.getByTestId(testId).click({ force: true })
+  const options = page.locator('.el-select-dropdown:visible').getByRole('option')
+  await (optionName ? options.filter({ hasText: optionName }).first() : options.first()).click({
+    force: true,
+  })
+}
+
 function isoDate(offsetDays: number): string {
   const value = new Date()
   value.setUTCDate(value.getUTCDate() + offsetDays)
@@ -350,7 +375,7 @@ test('slice B: production report through after-sales observation closes the orde
     await page.locator('[name="workHours"]').fill('8.000000')
     await page.locator('[name="equipment"]').fill('E2E-01')
     await page.getByRole('button', { name: '提交报工' }).click()
-    await expect(page.getByText('累计良品').locator('..').getByText(quantity)).toBeVisible()
+    await expect(page.getByText('累计良品').locator('..').getByText('10')).toBeVisible()
 
     const completionButton = page.getByTestId('completion-form').getByRole('button')
     await expect(page.getByText('尚无可选择的过程初检')).toBeVisible()
@@ -362,7 +387,7 @@ test('slice B: production report through after-sales observation closes the orde
       mimeType: 'image/png',
       buffer: png,
     })
-    await page.getByLabel('判定').selectOption('FAILED')
+    await selectComboboxOption(page, '巡检判定', '不通过')
     await page.locator('[name="inspector"]').fill('一检员')
     await page.getByTestId('inspection-submit').click()
     await expect(page.getByText(/未通过 · V1/)).toBeVisible()
@@ -387,24 +412,25 @@ test('slice B: production report through after-sales observation closes the orde
       mimeType: 'image/png',
       buffer: revisedPng,
     })
-    await page.getByLabel('判定').selectOption('PASSED')
+    await selectComboboxOption(page, '巡检判定', '通过')
     await page.locator('[name="inspector"]').fill('复检员')
     await page.getByTestId('inspection-submit').click()
     await expect(page.getByText(/已通过 · V2/)).toBeVisible()
     await page.getByTestId('completion-form').getByRole('button').click()
-    await expect(page.getByText('良品范围已完整覆盖，工单进入待完工')).toBeVisible()
+    await expect
+      .poll(async () => (await client.get<Entity>(`/work-orders/${workOrder.id}`)).status)
+      .toBe('READY_TO_COMPLETE')
+    await expect(page.getByRole('listitem').filter({ hasText: '待完工' })).toBeVisible()
   })
 
   let packingInspections: Array<{ id: string; passedQuantity: string }> = []
   await test.step('剪线、唯一正式成品质检和返工后新批次', async () => {
-    await page.goto('/quality')
-    await page.locator('[name="salesOrderId"]').fill(order.id)
-    await page.getByTestId('load-quality').getByRole('button').click()
+    await page.goto(`/quality?workOrderId=${workOrder.id}`)
     await expect(page.getByText('唯一正式成品质检')).toBeVisible()
     await page.locator('[name="trimQuantity"]').fill(quantity)
     await page.getByTestId('trim-submit').click()
-    await expect(page.getByText(`后整 ${quantity}`)).toBeVisible()
-    await page.locator('[name="inspectionMethod"]').selectOption('FULL')
+    await expect(page.getByText('后整 10')).toBeVisible()
+    await selectComboboxOption(page, '检验方式', '全检')
     await page.locator('[name="submittedQuantity"]').fill(quantity)
     await page.locator('[name="passedQuantity"]').fill('8.000000')
     await page.locator('[name="failedQuantity"]').fill('2.000000')
@@ -416,7 +442,7 @@ test('slice B: production report through after-sales observation closes the orde
     await page.locator('[name="reworkDisposition"]').fill('返工通过')
     await page.getByTestId('rework-submit').click()
     await expect(page.getByText('正式通过 / 待返工').locator('..').locator('strong')).toHaveText(
-      quantity,
+      '10',
     )
     const facts = await client.get<{
       passedQuantity: string
@@ -444,10 +470,10 @@ test('slice B: production report through after-sales observation closes the orde
     await page.goto(`/shipments/${order.id}`)
     for (const [index, inspection] of packingInspections.entries()) {
       await page.getByLabel('箱号').fill(`BOX-${fixture.suffix}-${index + 1}`)
-      await page.getByLabel('质检批次 ID').fill(inspection.id)
+      await selectComboboxOption(page, '质检批次', new RegExp(`检验 V${index + 1}`))
       await page.getByLabel('装箱数量').fill(inspection.passedQuantity)
       await page.getByRole('button', { name: '确认装箱' }).click()
-      const expectedPacked = index === packingInspections.length - 1 ? quantity : '8.000000'
+      const expectedPacked = index === packingInspections.length - 1 ? '10' : '8'
       await expect(page.getByText(`已装箱 ${expectedPacked}`)).toBeVisible()
     }
     const boxes = (
@@ -483,24 +509,19 @@ test('slice B: production report through after-sales observation closes the orde
       await page.getByTestId(`progress-${line.id}`).fill(line.plannedQuantity)
     }
     await page.getByTestId(`sign-${dispatched.id}`).click()
-    const signedCard = page
-      .getByRole('heading', { name: `发运单 ${dispatched.id}` })
-      .locator('..')
-      .locator('..')
-    await expect(signedCard).toContainText('SIGNED')
-    await expect(signedCard).toContainText('签收 8.000000 / 8.000000')
-    await expect(signedCard).toContainText('签收 2.000000 / 2.000000')
+    const signedCard = page.locator(`h2[title="${dispatched.id}"]`).locator('..').locator('..')
+    await expect(signedCard).toContainText('已签收')
+    await expect(signedCard).toContainText('签收 8 / 8')
+    await expect(signedCard).toContainText('签收 2 / 2')
   })
 
   await test.step('售后返工闭环、观察期拒绝和最终关单', async () => {
-    await page.getByTestId('after-sales-source').selectOption({ index: 1 })
+    await selectByTestId(page, 'after-sales-source')
     await page.getByTestId('after-sales-quantity').fill('2.000000')
-    await page.getByTestId('after-sales-reason').selectOption('QUALITY_ISSUE')
+    await selectByTestId(page, 'after-sales-reason', '质量问题')
     await page.getByTestId('after-sales-feedback').fill('客户反馈需要返工后补发')
     await page.getByTestId('create-after-sales').click()
-    await expect(
-      page.getByRole('link', { name: /QUALITY_ISSUE · CREATED · 2\.000000/ }),
-    ).toBeVisible()
+    await expect(page.getByRole('link', { name: /QUALITY_ISSUE · 已创建 · 2/ })).toBeVisible()
     const afterSales = (
       await client.get<{ afterSalesCases: Entity[] }>(`/shipment/orders/${order.id}`)
     ).afterSalesCases[0]!
@@ -527,8 +548,11 @@ test('slice B: production report through after-sales observation closes the orde
     await page.getByTestId('after-sales-next-action').click()
     await expect(page.getByTestId('after-sales-next-action')).toHaveText('创建补发发运单')
     await page.getByTestId('after-sales-next-action').click()
-    await expect(page.getByText(/补发发运单 [0-9a-f-]{36}/)).toBeVisible()
-    const caseView = await client.get<{ reshipmentId: string }>(`/after-sales/${afterSales.id}`)
+    const caseView = await expect
+      .poll(() => client.get<{ reshipmentId: string | null }>(`/after-sales/${afterSales.id}`))
+      .toMatchObject({ reshipmentId: expect.any(String) })
+      .then(async () => client.get<{ reshipmentId: string }>(`/after-sales/${afterSales.id}`))
+    await expect(page.getByText(/补发发运单 [0-9a-f]{8}/)).toBeVisible()
     const reshipmentId = caseView.reshipmentId
     await page.getByRole('link', { name: '进入发运审批工作台' }).click()
     await page.getByTestId(`request-shipment-${reshipmentId}`).click()
@@ -546,14 +570,16 @@ test('slice B: production report through after-sales observation closes the orde
     }
     await page.getByTestId(`sign-${reshipmentId}`).click()
     const signedReshipmentCard = page
-      .getByRole('heading', { name: `发运单 ${reshipmentId}` })
+      .locator(`h2[title="${reshipmentId}"]`)
       .locator('..')
       .locator('..')
-    await expect(signedReshipmentCard).toContainText('SIGNED')
+    await expect(signedReshipmentCard).toContainText('已签收')
     await page.goto(`/after-sales/${afterSales.id}`)
     await expect(page.getByTestId('after-sales-next-action')).toHaveText('确认售后结清')
     await page.getByTestId('after-sales-next-action').click()
-    await expect(page.getByText('COMPLETED', { exact: true })).toBeVisible()
+    await expect
+      .poll(async () => (await client.get<Entity>(`/after-sales/${afterSales.id}`)).status)
+      .toBe('COMPLETED')
 
     await page.goto(`/orders/${order.id}`)
     await expect
@@ -570,12 +596,32 @@ test('slice B: production report through after-sales observation closes the orde
         allExceptionsClosed: true,
       })
     await page.reload()
-    await page.getByTestId('close-order').click()
-    await expect(page.getByRole('alert')).toContainText('当前业务状态不允许该操作')
+    await expect(page.getByTestId('close-order')).toBeDisabled()
+    await expect(page.getByTestId('closure-gate')).toContainText('售后观察期已结束')
     await client.post('/test-support/advance-clock', { days: 7 }, false)
-    await login(page)
+    const refreshedToken = await login(page)
+    const refreshedClient = api(page, refreshedToken)
     await page.goto(`/orders/${order.id}`)
     await page.getByTestId('close-order').click()
+    await page.getByTestId('confirm-close-order').click()
     await expect(page.getByText('订单已完成')).toBeVisible()
+    const completedOrder = await refreshedClient.get<Entity>(`/sales-orders/${order.id}`)
+    expect(completedOrder.status).toBe('COMPLETED')
+    await page.screenshot({ path: testInfo.outputPath('case-2-order-completed.png'), fullPage: true })
+    await testInfo.attach('case-2-result.json', {
+      body: Buffer.from(
+        JSON.stringify(
+          {
+            orderId: order.id,
+            orderNo: order.orderNo,
+            status: completedOrder.status,
+            result: '真实发运、签收、售后返工及观察期结束后完成订单',
+          },
+          null,
+          2,
+        ),
+      ),
+      contentType: 'application/json',
+    })
   })
 })

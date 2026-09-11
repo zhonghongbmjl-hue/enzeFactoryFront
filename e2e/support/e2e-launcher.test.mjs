@@ -570,6 +570,7 @@ test('未知监听者占用恢复端口时 fail-safe 拒绝且不改变旧 lock/
 
 test('Compose detached child 通过 Node wrapper 携带 run token marker', () => {
   assert.match(webServerSource, /e2e-command-wrapper\.mjs/)
+  assert.doesNotMatch(webServerSource, /'frontend',\s*'e2e',\s*'support'/)
   assert.match(
     webServerSource,
     /recordActiveChild\([\s\S]*?'compose'[\s\S]*?garment\.e2e\.run-token=/,
@@ -805,6 +806,17 @@ test('并发接管陈旧锁只有一个胜者', async () => {
     releaseRunLock(root, oldToken)
     rmSync(root, { recursive: true, force: true })
   }
+})
+
+test('macOS 通过 ps 读取当前进程归属信息', { skip: process.platform !== 'darwin' }, async () => {
+  const current = await import('./e2e-launcher.mjs')
+  const inspected = current.inspectProcess(process.pid, 'darwin')
+  assert.equal(inspected?.pid, process.pid)
+  assert.ok(inspected?.parentPid > 0)
+  assert.ok(inspected?.processGroupId > 0)
+  assert.equal(inspected?.sessionId, null)
+  assert.ok(inspected?.commandLine.includes('node'))
+  assert.ok(Number.isFinite(inspected?.startedAt))
 })
 
 test('篡改或 PID 复用的陈旧状态拒绝回收并恢复旧锁', async () => {

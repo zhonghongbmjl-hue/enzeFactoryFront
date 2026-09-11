@@ -18,9 +18,6 @@ const emit = defineEmits<{ navigate: [path: string] }>()
     active-text-color="var(--ink-950)"
   >
     <template v-for="item in props.items" :key="item.index">
-      <li v-if="item.groupLabel" class="navigation-group-label" role="presentation">
-        {{ item.groupLabel }}
-      </li>
       <el-menu-item
         :index="item.index"
         :aria-label="item.ariaLabel"
@@ -32,18 +29,3 @@ const emit = defineEmits<{ navigate: [path: string] }>()
     </template>
   </el-menu>
 </template>
-
-<style scoped>
-.navigation-group-label {
-  padding: 12px 20px 5px;
-  color: rgba(248, 244, 233, 0.5);
-  font:
-    700 10px/1.2 Consolas,
-    monospace;
-  letter-spacing: 0.14em;
-}
-
-.navigation-group-label:first-child {
-  padding-top: 6px;
-}
-</style>

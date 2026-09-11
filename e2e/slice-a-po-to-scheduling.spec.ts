@@ -1,4 +1,4 @@
-import { expect, test, type APIResponse } from '@playwright/test'
+import { expect, test, type APIResponse, type Page } from '@playwright/test'
 
 type Entity = Record<string, unknown> & { id: string; version: number; status?: string }
 type Fixture = {
@@ -35,6 +35,19 @@ async function responseData<T>(response: APIResponse): Promise<T> {
   expect(response.ok(), text).toBeTruthy()
   const envelope = JSON.parse(text) as { data: T }
   return envelope.data
+}
+
+async function selectPlanningOption(
+  page: Page,
+  testId: string,
+  optionName: string | RegExp,
+): Promise<void> {
+  await page.getByTestId(testId).click({ force: true })
+  await page
+    .locator('.el-select-dropdown:visible')
+    .getByRole('option', { name: optionName })
+    .first()
+    .click({ force: true })
 }
 
 test('slice A: PO through full kitting creates and approves a manual production schedule', async ({
@@ -266,17 +279,17 @@ test('slice A: PO through full kitting creates and approves a manual production 
 
   const plannedBatch = `PLAN-${suffix}`
   await page.goto('/production')
-  await page.getByLabel('订单 ID').fill(order.id)
-  await page.getByLabel('订单项 ID').fill(orderItemId ?? '')
-  await page.getByLabel('SKU ID').fill(fixture.skuId)
-  await page.getByLabel('齐套释放 ID').fill(release.id)
-  await page.getByLabel('工厂 ID').fill(fixture.factoryId)
-  await page.getByLabel('车间 ID').fill(fixture.workshopId)
-  await page.getByLabel('产线 ID').fill(fixture.productionLineId)
-  await page.getByLabel('排产数量').fill(decimalQuantity)
-  await page.getByLabel('计划批次').fill(plannedBatch)
-  await page.getByLabel('开始日期').fill(isoDate(1))
-  await page.getByLabel('结束日期').fill(isoDate(7))
+  await selectPlanningOption(page, 'planning-order', order.orderNo)
+  await selectPlanningOption(page, 'planning-order-item', /黑色 \/ M \/ 常规/)
+  await selectPlanningOption(page, 'planning-sku', /黑色 \/ M \/ 常规/)
+  await selectPlanningOption(page, 'planning-kitting-release', /可排产 10/)
+  await selectPlanningOption(page, 'planning-factory', new RegExp(`EF${suffix} · E2E 工厂`))
+  await selectPlanningOption(page, 'planning-workshop', new RegExp(`EW${suffix} · E2E 车间`))
+  await selectPlanningOption(page, 'planning-line', new RegExp(`EL${suffix} · E2E 产线`))
+  await page.locator('[name="quantity"]').fill(decimalQuantity)
+  await page.locator('[name="plannedBatchCode"]').fill(plannedBatch)
+  await page.locator('[name="startDate"]').fill(isoDate(1))
+  await page.locator('[name="endDate"]').fill(isoDate(7))
   await page.getByRole('button', { name: '创建排产草案' }).click()
 
   await expect(page.getByText('待审批', { exact: true })).toBeVisible()
@@ -285,4 +298,20 @@ test('slice A: PO through full kitting creates and approves a manual production 
   await page.getByRole('button', { name: '审批并签发排程' }).click()
   await expect(page.getByText('已审批', { exact: true })).toBeVisible()
   await expect(page.getByText('工单门已开启', { exact: true })).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath('case-1-schedule-approved.png'), fullPage: true })
+  await testInfo.attach('case-1-result.json', {
+    body: Buffer.from(
+      JSON.stringify(
+        {
+          orderId: order.id,
+          orderNo: order.orderNo,
+          productionBatch: plannedBatch,
+          result: '生产排程已审批，工单门已开启',
+        },
+        null,
+        2,
+      ),
+    ),
+    contentType: 'application/json',
+  })
 })
